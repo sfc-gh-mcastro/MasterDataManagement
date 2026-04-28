@@ -1,0 +1,23 @@
+manifest_version: 2
+type: DCM_PROJECT
+default_target: 'DEV'
+
+targets:
+  DEV:
+    account_identifier: ZS28104
+    project_name: 'MASTER_DATA_MANAGEMENT.CRM_AGG_001.MDM_PROJECT'
+    project_owner: ACCOUNTADMIN
+    templating_config: 'DEV'
+
+templating:
+  defaults:
+    db: 'MASTER_DATA_MANAGEMENT'
+    raw_schema: 'CRM_RAW_001'
+    agg_schema: 'CRM_AGG_001'
+    srv_schema: 'CRM_SRV_001'
+    warehouse: 'MD_TEST_WH'
+    dt_lag: '1 hour'
+  configurations:
+    DEV:
+      warehouse: 'MD_TEST_WH'
+      dt_lag: '1 hour'

@@ -1,0 +1,8 @@
+.DS_Store
+out/
+output/
+.scannerwork/
+__pycache__/
+*.pyc
+app/.streamlit/secrets.toml
+.snowflake/
