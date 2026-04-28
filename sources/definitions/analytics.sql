@@ -17,7 +17,7 @@ SELECT
     END AS canonical_first_name,
     CASE WHEN first_name IS NOT NULL AND last_name IS NOT NULL
              AND LENGTH(TRIM(first_name)) > 0 AND LENGTH(TRIM(last_name)) > 0
-        THEN AI_CLASSIFY(TRIM(first_name) || ' ' || TRIM(last_name),
+        THEN SNOWFLAKE.CORTEX.AI_CLASSIFY(TRIM(first_name) || ' ' || TRIM(last_name),
             ['real_person_name', 'fake_or_test_name']):labels[0]::VARCHAR = 'fake_or_test_name'
         ELSE FALSE
     END AS is_fake_name,

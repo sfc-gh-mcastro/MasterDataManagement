@@ -2,7 +2,7 @@
 -- infrastructure.sql — Warehouse and internal stages
 -- =============================================================================
 
-DEFINE WAREHOUSE {{db}}.{{agg_schema}}.{{warehouse}}
+DEFINE WAREHOUSE {{warehouse}}
 WITH
     WAREHOUSE_SIZE = 'XSMALL'
     AUTO_SUSPEND = 60
