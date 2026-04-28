@@ -26,7 +26,7 @@ if [[ ! -f "$WORKFLOW_FILE" ]]; then
   exit 1
 fi
 
-ACTUAL_HASH=$(shasum -a 256 "$WORKFLOW_FILE" | awk '{print $1}')
+ACTUAL_HASH=$(sha256sum "$WORKFLOW_FILE" | awk '{print $1}')
 
 echo "Verifying workflow integrity..."
 echo "→ Expected SHA256: $EXPECTED_HASH"

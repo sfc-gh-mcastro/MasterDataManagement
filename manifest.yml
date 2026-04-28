@@ -4,9 +4,9 @@ default_target: 'DEV'
 
 targets:
   DEV:
-    account_identifier: ZS28104
+    account_identifier: SFSEEUROPE-ZS28104
     project_name: 'MASTER_DATA_MANAGEMENT.CRM_AGG_001.MDM_PROJECT'
-    project_owner: ACCOUNTADMIN
+    project_owner: CICD
     templating_config: 'DEV'
 
 templating:
