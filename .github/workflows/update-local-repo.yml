@@ -5,6 +5,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: write
+  actions: read
+  checks: write
+
 jobs:
   pipeline:
     uses: zbrainiac-labs/DataOpsBackbone/.github/workflows/dataops-pipeline.yml@main

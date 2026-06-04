@@ -1,4 +1,27 @@
 # Snowflake-Native Master Data Management
+
+## Repository Structure
+
+```
+MasterDataManagement/
+├── bulk/                   Batch MDM on Snowflake (Dynamic Tables, DCM, hourly lag)
+│   ├── sources/            SQL definitions (DTs, views, serving layers)
+│   ├── sqlunit/            SQL unit tests
+│   ├── scripts/            Test data generation
+│   ├── tests/              E2E validation & notebooks
+│   ├── app/                Streamlit dashboard
+│   ├── pre_deploy.sql      DCM pre-deploy hook
+│   └── post_deploy.sql     DCM post-deploy hook
+├── nrt/                    Near-Real-Time MDM (Kafka + Postgres, sub-second)
+│   ├── src/nrt_mdm/        Python consumer, matching, survivorship, DQ
+│   ├── schema/             Postgres DDL
+│   ├── tests/              Unit + E2E tests
+│   ├── docker-compose.yml  Local dev stack
+│   └── Dockerfile          MDM engine container
+├── manifest.yml            DCM project manifest (root for tooling compatibility)
+└── README.md               This file
+```
+
 ## Why
 
 Organizations running multiple systems that keep similar types of data -- such as CRM, ERP, or billing -- face a common problem: the same entity (customer, product, account) exists as separate, conflicting records across systems. There is no single source of truth, data quality is unknown, and historical changes are invisible. Commercial MDM platforms solve this but at significant complexity and cost.
