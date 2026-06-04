@@ -380,20 +380,44 @@ MasterDataManagement/
 
 ```bash
 # 1. Pre-deploy: database + schemas
-snow sql -f pre_deploy.sql -c <connection>
+snow sql -f pre_deploy.sql \
+  --enable-templating JINJA \
+  -D db=MDM_DEV \
+  -D warehouse=MD_TEST_WH \
+  -D raw_schema=MDM_RAW_v001 \
+  -D agg_schema=MDM_AGG_v001 \
+  -D srv_schema=MDM_SRV_v001 \
+  -c <connection>
 
 # 2. DCM analyze + plan + deploy
-snow dcm raw-analyze MDM_DEV.MDM_AGG_001.MDM_PROJECT -c <connection> --target DEV
-snow dcm plan MDM_DEV.MDM_AGG_001.MDM_PROJECT -c <connection> --target DEV
-snow dcm deploy MDM_DEV.MDM_AGG_001.MDM_PROJECT -c <connection> --target DEV
+snow dcm raw-analyze MDM_DEV.MDM_DCM.MDM_PROJECT -c <connection> --target DEV
+snow dcm plan MDM_DEV.MDM_DCM.MDM_PROJECT -c <connection> --target DEV
+snow dcm deploy MDM_DEV.MDM_DCM.MDM_PROJECT -c <connection> --target DEV
 
 # 3. Post-deploy: file formats, streams, tasks
-snow sql -f post_deploy.sql -c <connection>
+snow sql -f post_deploy.sql \
+  --enable-templating JINJA \
+  -D db=MDM_DEV \
+  -D raw_schema=MDM_RAW_v001 \
+  -D agg_schema=MDM_AGG_v001 \
+  -D srv_schema=MDM_SRV_v001 \
+  -c <connection>
 
-# 4. Upload test data
-./upload_data.sh --CONNECTION_NAME=<connection>
+# 4. Generate test data (requires faker — uv handles it automatically)
+uv run --with faker shared/scripts/generate_test_data.py
 
-# 5. Dashboard
+# 5. Upload test data to Snowflake stages
+bash bulk/upload_data.sh --CONNECTION_NAME=<connection>
+
+# 5b. (Optional) Trigger ingestion tasks immediately instead of waiting up to 60 min
+snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_CUSTOMER_A"  -c <connection>
+snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_CUSTOMER_B"  -c <connection>
+snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_CUSTOMER_C"  -c <connection>
+snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_ADDRESSES_A" -c <connection>
+snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_ADDRESSES_B" -c <connection>
+snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_ADDRESSES_C" -c <connection>
+
+# 6. Dashboard
 cd app && streamlit run streamlit_app.py
 ```
 

@@ -37,7 +37,7 @@ set -e
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_DIR="$BASE_DIR/../shared/output"
 DATABASE="MDM_DEV"
-SCHEMA="MDM_RAW_001"
+SCHEMA="MDM_RAW_v001"
 CONNECTION_NAME=""
 DRY_RUN=false
 INITIAL_ONLY=false
