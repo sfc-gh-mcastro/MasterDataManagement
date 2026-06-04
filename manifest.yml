@@ -4,7 +4,7 @@ default_target: 'DEV'
 
 targets:
   DEV:
-    account_identifier: SFSEEUROPE-ZS28104
+    account_identifier: SFSEEUROPE-AWS_EUNORTH1
     project_name: 'MDM_DEV.MDM_DCM.MDM_PROJECT'
     project_owner: CICD
     templating_config: 'DEV'

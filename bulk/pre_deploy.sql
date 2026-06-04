@@ -1,3 +1,9 @@
+CREATE WAREHOUSE IF NOT EXISTS {{ warehouse }}
+    WAREHOUSE_SIZE = 'X-SMALL'
+    AUTO_SUSPEND = 60
+    AUTO_RESUME = TRUE
+    COMMENT = 'Warehouse for MDM pipeline (Dynamic Tables, ingestion tasks)';
+
 CREATE DATABASE IF NOT EXISTS {{ db }}
     COMMENT = 'Central repository for unified customer and address master data';
 
