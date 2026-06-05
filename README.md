@@ -400,12 +400,7 @@ snow dcm plan MDM_DEV.MDM_DCM.MDM_PROJECT -c <connection> --target DEV
 snow dcm deploy MDM_DEV.MDM_DCM.MDM_PROJECT -c <connection> --target DEV
 
 # 3. Post-deploy: file formats, streams, tasks
-snow sql -f post_deploy.sql \
-  -D db=MDM_DEV \
-  -D raw_schema=MDM_RAW_v001 \
-  -D agg_schema=MDM_AGG_v001 \
-  -D srv_schema=MDM_SRV_v001 \
-  -c <connection>
+snow sql -f post_deploy.sql -c <connection>
 
 # 4. Generate test data (requires faker — uv handles it automatically)
 uv run --with faker shared/scripts/generate_test_data.py

@@ -7,8 +7,8 @@
 --   -c <connection>
 -- =============================================================================
 
-USE DATABASE {{ db }};
-USE SCHEMA {{ raw_schema }};
+USE DATABASE MDM_DEV;
+USE SCHEMA MDM_RAW_v001;
 
 -- File Formats
 CREATE OR REPLACE FILE FORMAT CRMI_RAW_FF_FREG  TYPE='CSV' FIELD_DELIMITER=',' SKIP_HEADER=1 FIELD_OPTIONALLY_ENCLOSED_BY='"' NULL_IF=('','NULL','null')       EMPTY_FIELD_AS_NULL=TRUE ENCODING='UTF8';
@@ -75,7 +75,7 @@ AS COPY INTO CRMI_RAW_TB_ADDRESSES_NICE (SRC_ADDRESS_ID, SRC_CUSTOMER_ID, GATE, 
 
 -- Unmerge override table for Scenario 5 (POC demo)
 -- Groups DT reads this table and excludes matching pairs via LEFT ANTI JOIN
-CREATE TABLE IF NOT EXISTS {{ db }}.{{ agg_schema }}.CRMA_AGG_TB_UNMERGE_OVERRIDES (
+CREATE TABLE IF NOT EXISTS MDM_DEV.MDM_AGG_v001.CRMA_AGG_TB_UNMERGE_OVERRIDES (
     SOURCE_KEY_A VARCHAR(100),
     SOURCE_KEY_B VARCHAR(100),
     REASON       VARCHAR(500),
