@@ -51,7 +51,7 @@ DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_ADDRESSES_FREG (
     SRC_CUSTOMER_ID VARCHAR(50)  NOT NULL COMMENT 'FK to CRMI_RAW_TB_FREG.SSN',
     GATE            VARCHAR(255) COMMENT 'Norwegian street address including house number (e.g. Storgata 12)',
     POSTNUMMER      VARCHAR(4)   COMMENT '4-digit Norwegian postal code',
-    BY              VARCHAR(100) COMMENT 'Norwegian city or municipality (by/kommune)',
+    "BY"              VARCHAR(100) COMMENT 'Norwegian city or municipality (by/kommune)',
     LAND            VARCHAR(5)   COMMENT 'ISO 3166-1 alpha-2 country code (default NO)',
     _SOURCE_FILE    VARCHAR(500) COMMENT 'Source filename for data lineage (metadata$filename)'
 )
@@ -62,7 +62,7 @@ DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_ADDRESSES_BS (
     SRC_CUSTOMER_ID VARCHAR(50)  NOT NULL COMMENT 'FK to CRMI_RAW_TB_BS.SSN',
     GATE            VARCHAR(255) COMMENT 'Norwegian street address including house number',
     POSTNUMMER      VARCHAR(4)   COMMENT '4-digit Norwegian postal code',
-    BY              VARCHAR(100) COMMENT 'Norwegian city or municipality',
+    "BY"              VARCHAR(100) COMMENT 'Norwegian city or municipality',
     LAND            VARCHAR(5)   COMMENT 'ISO 3166-1 alpha-2 country code (default NO)',
     _SOURCE_FILE    VARCHAR(500) COMMENT 'Source filename for data lineage (metadata$filename)'
 )
@@ -73,7 +73,7 @@ DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_ADDRESSES_NICE (
     SRC_CUSTOMER_ID VARCHAR(50)  NOT NULL COMMENT 'FK to CRMI_RAW_TB_NICE — may be SSN or  system-generated ID when SSN is null',
     GATE            VARCHAR(255) COMMENT 'Norwegian street address including house number',
     POSTNUMMER      VARCHAR(4)   COMMENT '4-digit Norwegian postal code',
-    BY              VARCHAR(100) COMMENT 'Norwegian city or municipality',
+    "BY"              VARCHAR(100) COMMENT 'Norwegian city or municipality',
     LAND            VARCHAR(5)   COMMENT 'ISO 3166-1 alpha-2 country code (default NO)',
     _SOURCE_FILE    VARCHAR(500) COMMENT 'Source filename for data lineage (metadata$filename)'
 )
