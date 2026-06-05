@@ -6,14 +6,14 @@
 # 
 # This script uploads generated test data to the appropriate Snowflake stages
 # based on the MDM directory structure:
-#   output/initial/A/customer/  -> CRMI_RAW_ST_CUSTOMER_A
-#   output/initial/A/address/   -> CRMI_RAW_ST_ADDRESSES_A
-#   output/initial/B/customer/  -> CRMI_RAW_ST_CUSTOMER_B
-#   output/initial/B/address/   -> CRMI_RAW_ST_ADDRESSES_B
-#   output/update/A/customer/   -> CRMI_RAW_ST_CUSTOMER_A
-#   output/update/A/address/    -> CRMI_RAW_ST_ADDRESSES_A
-#   output/update/B/customer/   -> CRMI_RAW_ST_CUSTOMER_B
-#   output/update/B/address/    -> CRMI_RAW_ST_ADDRESSES_B
+#   output/initial/FREG/customer/  -> CRMI_RAW_ST_FREG
+#   output/initial/FREG/address/   -> CRMI_RAW_ST_ADDRESSES_FREG
+#   output/initial/BS/customer/  -> CRMI_RAW_ST_BS
+#   output/initial/BS/address/   -> CRMI_RAW_ST_ADDRESSES_BS
+#   output/update/FREG/customer/   -> CRMI_RAW_ST_FREG
+#   output/update/FREG/address/    -> CRMI_RAW_ST_ADDRESSES_FREG
+#   output/update/BS/customer/   -> CRMI_RAW_ST_BS
+#   output/update/BS/address/    -> CRMI_RAW_ST_ADDRESSES_BS
 #
 # Usage:
 #   ./upload_data.sh --CONNECTION_NAME=<my-sf-connection> [OPTIONS]
@@ -196,34 +196,34 @@ if [[ "$UPDATES_ONLY" != "true" ]]; then
   echo ""
   
   upload_to_stage \
-    "$DATA_DIR/initial/A/customer" \
-    "CRMI_RAW_ST_CUSTOMER_A" \
-    "CRM A Customers (Initial)"
+    "$DATA_DIR/initial/FREG/customer" \
+    "CRMI_RAW_ST_FREG" \
+    "FREG Customers (Initial)"
   
   upload_to_stage \
-    "$DATA_DIR/initial/A/address" \
-    "CRMI_RAW_ST_ADDRESSES_A" \
-    "CRM A Addresses (Initial)"
+    "$DATA_DIR/initial/FREG/address" \
+    "CRMI_RAW_ST_ADDRESSES_FREG" \
+    "FREG Addresses (Initial)"
   
   upload_to_stage \
-    "$DATA_DIR/initial/B/customer" \
-    "CRMI_RAW_ST_CUSTOMER_B" \
-    "CRM B Customers (Initial)"
+    "$DATA_DIR/initial/BS/customer" \
+    "CRMI_RAW_ST_BS" \
+    "BS Customers (Initial)"
   
   upload_to_stage \
-    "$DATA_DIR/initial/B/address" \
-    "CRMI_RAW_ST_ADDRESSES_B" \
-    "CRM B Addresses (Initial)"
+    "$DATA_DIR/initial/BS/address" \
+    "CRMI_RAW_ST_ADDRESSES_BS" \
+    "BS Addresses (Initial)"
   
   upload_to_stage \
-    "$DATA_DIR/initial/C/customer" \
-    "CRMI_RAW_ST_CUSTOMER_C" \
-    "CRM C Customers (Initial)"
+    "$DATA_DIR/initial/NICE/customer" \
+    "CRMI_RAW_ST_NICE" \
+    "NICE Customers (Initial)"
   
   upload_to_stage \
-    "$DATA_DIR/initial/C/address" \
-    "CRMI_RAW_ST_ADDRESSES_C" \
-    "CRM C Addresses (Initial)"
+    "$DATA_DIR/initial/NICE/address" \
+    "CRMI_RAW_ST_ADDRESSES_NICE" \
+    "NICE Addresses (Initial)"
 fi
 
 # =============================================================================
@@ -236,34 +236,34 @@ if [[ "$INITIAL_ONLY" != "true" ]]; then
   echo ""
   
   upload_to_stage \
-    "$DATA_DIR/update/A/customer" \
-    "CRMI_RAW_ST_CUSTOMER_A" \
-    "CRM A Customers (Updates)"
+    "$DATA_DIR/update/FREG/customer" \
+    "CRMI_RAW_ST_FREG" \
+    "FREG Customers (Updates)"
   
   upload_to_stage \
-    "$DATA_DIR/update/A/address" \
-    "CRMI_RAW_ST_ADDRESSES_A" \
-    "CRM A Addresses (Updates)"
+    "$DATA_DIR/update/FREG/address" \
+    "CRMI_RAW_ST_ADDRESSES_FREG" \
+    "FREG Addresses (Updates)"
   
   upload_to_stage \
-    "$DATA_DIR/update/B/customer" \
-    "CRMI_RAW_ST_CUSTOMER_B" \
-    "CRM B Customers (Updates)"
+    "$DATA_DIR/update/BS/customer" \
+    "CRMI_RAW_ST_BS" \
+    "BS Customers (Updates)"
   
   upload_to_stage \
-    "$DATA_DIR/update/B/address" \
-    "CRMI_RAW_ST_ADDRESSES_B" \
-    "CRM B Addresses (Updates)"
+    "$DATA_DIR/update/BS/address" \
+    "CRMI_RAW_ST_ADDRESSES_BS" \
+    "BS Addresses (Updates)"
   
   upload_to_stage \
-    "$DATA_DIR/update/C/customer" \
-    "CRMI_RAW_ST_CUSTOMER_C" \
-    "CRM C Customers (Updates)"
+    "$DATA_DIR/update/NICE/customer" \
+    "CRMI_RAW_ST_NICE" \
+    "NICE Customers (Updates)"
   
   upload_to_stage \
-    "$DATA_DIR/update/C/address" \
-    "CRMI_RAW_ST_ADDRESSES_C" \
-    "CRM C Addresses (Updates)"
+    "$DATA_DIR/update/NICE/address" \
+    "CRMI_RAW_ST_ADDRESSES_NICE" \
+    "NICE Addresses (Updates)"
 fi
 
 # =============================================================================
@@ -279,12 +279,12 @@ if [[ "$DRY_RUN" != "true" && $SUCCESSFUL_UPLOADS -gt 0 ]]; then
   snow sql -c "$CONNECTION_NAME" -q "
     USE DATABASE $DATABASE;
     USE SCHEMA $SCHEMA;
-    ALTER STAGE CRMI_RAW_ST_CUSTOMER_A REFRESH;
-    ALTER STAGE CRMI_RAW_ST_CUSTOMER_B REFRESH;
-    ALTER STAGE CRMI_RAW_ST_CUSTOMER_C REFRESH;
-    ALTER STAGE CRMI_RAW_ST_ADDRESSES_A REFRESH;
-    ALTER STAGE CRMI_RAW_ST_ADDRESSES_B REFRESH;
-    ALTER STAGE CRMI_RAW_ST_ADDRESSES_C REFRESH;
+    ALTER STAGE CRMI_RAW_ST_FREG REFRESH;
+    ALTER STAGE CRMI_RAW_ST_BS REFRESH;
+    ALTER STAGE CRMI_RAW_ST_NICE REFRESH;
+    ALTER STAGE CRMI_RAW_ST_ADDRESSES_FREG REFRESH;
+    ALTER STAGE CRMI_RAW_ST_ADDRESSES_BS REFRESH;
+    ALTER STAGE CRMI_RAW_ST_ADDRESSES_NICE REFRESH;
   " > /dev/null 2>&1 || echo "  [WARN] Stage refresh may require additional permissions"
   
   echo "[OK] Stage metadata refreshed"
@@ -313,20 +313,20 @@ elif [[ $FAILED_UPLOADS -eq 0 && $SUCCESSFUL_UPLOADS -gt 0 ]]; then
   echo ""
   echo "Next steps:"
   echo "  1. Check streams have data:"
-  echo "     SELECT SYSTEM\$STREAM_HAS_DATA('$DATABASE.$SCHEMA.CRMI_RAW_SM_CUSTOMER_A');"
+  echo "     SELECT SYSTEM\$STREAM_HAS_DATA('$DATABASE.$SCHEMA.CRMI_RAW_SM_FREG');"
   echo ""
   echo "  2. Enable tasks to start loading:"
-  echo "     ALTER TASK $DATABASE.$SCHEMA.CRMI_RAW_TS_LOAD_CUSTOMER_A RESUME;"
-  echo "     ALTER TASK $DATABASE.$SCHEMA.CRMI_RAW_TS_LOAD_CUSTOMER_B RESUME;"
-  echo "     ALTER TASK $DATABASE.$SCHEMA.CRMI_RAW_TS_LOAD_ADDRESSES_A RESUME;"
-  echo "     ALTER TASK $DATABASE.$SCHEMA.CRMI_RAW_TS_LOAD_ADDRESSES_B RESUME;"
+  echo "     ALTER TASK $DATABASE.$SCHEMA.CRMI_RAW_TS_LOAD_FREG RESUME;"
+  echo "     ALTER TASK $DATABASE.$SCHEMA.CRMI_RAW_TS_LOAD_BS RESUME;"
+  echo "     ALTER TASK $DATABASE.$SCHEMA.CRMI_RAW_TS_LOAD_ADDRESSES_FREG RESUME;"
+  echo "     ALTER TASK $DATABASE.$SCHEMA.CRMI_RAW_TS_LOAD_ADDRESSES_BS RESUME;"
   echo ""
   echo "  3. Monitor task execution:"
   echo "     SELECT * FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY())"
   echo "     WHERE DATABASE_NAME = '$DATABASE' ORDER BY SCHEDULED_TIME DESC;"
   echo ""
   echo "  4. Verify data loaded:"
-  echo "     SELECT COUNT(*) FROM $DATABASE.$SCHEMA.CRMI_RAW_TB_CUSTOMER_A;"
+  echo "     SELECT COUNT(*) FROM $DATABASE.$SCHEMA.CRMI_RAW_TB_FREG;"
 elif [[ $SUCCESSFUL_UPLOADS -eq 0 ]]; then
   echo "[WARN] No files were uploaded"
   echo "Please ensure test data has been generated:"
