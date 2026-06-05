@@ -2,7 +2,7 @@
 
 ## **Quickstart for Data Engineering Workflows**
 
-| What this guide covers This quickstart walks through a realistic Master Data Management (MDM) use case using Cortex Code CLI. You begin inside Snowflake to discover data, compare schemas across three CRM source systems, and build a Dynamic Table chain for customer golden records. You then add local business context with a reusable PRD Evaluator skill and, optionally, use the resulting data product as the foundation for a Cortex data agent. |
+| What this guide covers This quickstart walks through a realistic Master Data Management (MDM) use case using Cortex Code CLI. You begin inside Snowflake to discover data, compare schemas across three Norwegian banking source systems (FREG, BS, and NICE), and build a Dynamic Table chain for customer golden records using personnummer as the primary match key. You then add local business context with a reusable PRD Evaluator skill and, optionally, use the resulting data product as the foundation for a Cortex data agent. |
 | :---- |
 
 **Designed for hands-on use:** run it end to end as a lab or reuse individual prompts and patterns in your own projects.
@@ -12,7 +12,7 @@ This quickstart is written for data engineers and analytics engineers who alread
 
 | Audience | What you will be able to do |
 | :---- | :---- |
-| Data engineers and analytics engineers | Discover source tables, normalize three CRM schemas, build a Dynamic Table chain that produces golden customer records, operationalize it with a bundled skill, and extend the workflow with a reusable PRD Evaluator skill and optional agent design. |
+| Data engineers and analytics engineers | Discover source tables, compare schemas across FREG, BS, and NICE, build a Dynamic Table chain that produces golden customer records per organization (BANK and INS), operationalize it with a bundled skill, and extend the workflow with a reusable PRD Evaluator skill and optional agent design. |
 
 **Before You Begin**
 
@@ -65,7 +65,7 @@ Cortex Code CLI supports execution modes that make changes explainable and contr
 
 | Step | Demo | Outcome |
 | :---- | :---- | :---- |
-| **1** | **Demo 1** | Discover source tables, compare three CRM schemas, build a golden customer record Dynamic Table chain, and generate an operating runbook with the Dynamic Table skill. |
+| **1** | **Demo 1** | Discover source tables, compare FREG/BS/NICE schemas, build a golden customer record Dynamic Table chain with org-partitioned golden records and a data steward queue, and generate an operating runbook with the Dynamic Table skill. |
 | **2** | **Demo 2** | Read a local spec file, create a reusable PRD Evaluator skill, and apply repeatable updates to the MDM pipeline. |
 | **3** | **Demo 3 (optional)** | Use the curated golden customer records as the foundation for a Cortex data agent and establish a simple evaluation workflow. |
 
@@ -75,7 +75,7 @@ Cortex Code CLI supports execution modes that make changes explainable and contr
 
 Value in this section: You begin with the highest-confidence path: data that is already in Snowflake. In this demo you discover the right source tables, compare three CRM schemas, generate a Dynamic Table chain that produces trusted golden customer records, and use a bundled Dynamic Table skill to understand how those objects should be operated and monitored.
 
-Client story: The organization runs three CRM systems that all store overlapping information about the same real-world customers. There is no single trusted view across systems — duplicates, conflicting attributes, and missing history make it impossible to answer "How many customers do we have?" The goal is a governed MDM pipeline that identifies which records belong to the same person (entity resolution), picks the best attribute value when sources disagree (survivorship), and produces a single golden customer record per real-world entity with a transparent data quality score.
+Client story: Sparebank 1 runs three source systems that all carry overlapping information about the same real-world customers: FREG (Folkeregisteret — the Norwegian national population register, highest trust), BS (Bank System, mid trust), and NICE (CRM, lowest trust). Two organizations — BANK and INS (Insurance) — each need their own golden record, but share FREG as a common trusted source. There is no single trusted view across systems — duplicates, conflicting attributes, and missing history make it impossible to answer "How many customers do we have across both organizations?" The goal is a governed MDM pipeline that uses personnummer (Norwegian SSN) as the primary match key, identifies which records belong to the same person, picks the best attribute value when sources disagree (survivorship), and produces a single golden customer record per real-world entity per organization with a transparent data quality score.
 
 **Step 1.1 – Discover the source**
 Begin with data discovery. This is a core Cortex Code CLI workflow and a natural first move when you enter a new schema.
@@ -85,23 +85,24 @@ Begin with data discovery. This is a core Cortex Code CLI workflow and a natural
 
 | What to look for |
 | :---- |
-| • The three raw CRM source tables: CRMI\_RAW\_TB\_CUSTOMER\_A, CRMI\_RAW\_TB\_CUSTOMER\_B, CRMI\_RAW\_TB\_CUSTOMER\_C. |
-| • A short description of each table so you can orient yourself without manually opening each object. |
-| • Identification of the union view (VW\_CUSTOMER\_UNION) as the harmonization point. |
+| • The three raw source tables: CRMI\_RAW\_TB\_FREG (Folkeregisteret), CRMI\_RAW\_TB\_BS (Bank System), CRMI\_RAW\_TB\_NICE (CRM). |
+| • The three corresponding address tables: CRMI\_RAW\_TB\_ADDRESSES\_FREG/BS/NICE. |
+| • A short description of each table — note that FREG has no Organization or phone/email field (it is a national register). |
+| • Identification of the union view (CRMA\_AGG\_VW\_CUSTOMER\_UNION) as the harmonization point, including the FREG org-broadcast pattern. |
 
-**Step 1.2 – Compare the three CRM schemas**
+**Step 1.2 – Compare the three source schemas**
 
 Once you know which tables matter, compare them and highlight differences. This gives you the shortest path to a clean normalization plan.
 
-| Prompt Compare the columns across MDM\_DEV.MDM\_RAW\_v001.CRMI\_RAW\_TB\_CUSTOMER\_A, CRMI\_RAW\_TB\_CUSTOMER\_B, and CRMI\_RAW\_TB\_CUSTOMER\_C. Return: \- Equivalent fields with different names across sources (for example, the primary key, name, email, and phone fields) \- Fields that require type normalization or default values \- Structural differences in how names are stored (split vs. combined) \- Differences that should remain open questions instead of becoming hidden assumptions |
+| Prompt Compare the columns across MDM\_DEV.MDM\_RAW\_v001.CRMI\_RAW\_TB\_FREG, CRMI\_RAW\_TB\_BS, and CRMI\_RAW\_TB\_NICE. Return: \- Equivalent fields and which are present in some sources but absent in others (for example, SSN is in FREG and BS but nullable in NICE; Organization is absent from FREG entirely) \- Fields that require type normalization (dates, phone number formats) \- The trust hierarchy across sources and how it should drive survivorship \- Differences that should remain open questions instead of becoming hidden assumptions |
 | :---- |
 
 | What to look for |
 | :---- |
-| • That the three sources use different primary key names (SRC\_CUSTOMER\_ID, CUSTOMER\_KEY, TICKET\_CUSTOMER\_ID). |
-| • That name fields are split in source A but combined in sources B and C. |
-| • That email and phone columns have different names across sources. |
-| • Open questions about trust levels and source priority that should stay explicit. |
+| • That FREG is the only source with SSN (personnummer) guaranteed present; NICE records may have NULL SSN, driving the fuzzy-only matching scenario. |
+| • That FREG has no Organization or Phone/Email fields — it is a national register that feeds both BANK and INS golden records via a CROSS JOIN. |
+| • That trust order is FREG > BS > NICE, with a per-field exception for Citizenship in the BANK org (FREG and BS are tied at rank 1). |
+| • Open questions about how to handle records that match neither SSN nor name — these go to the data steward queue. |
 
 **Step 1.3 – Generate the MDM Dynamic Table chain**
 
@@ -122,14 +123,15 @@ Plan mode is one of a few different execution modes that Cortex Code CLI enables
 | Plan mode | Stays read-only while it thinks, then returns a structured multi-step plan and waits for your approval before executing. | Multi-step or higher-risk tasks, such as creating or updating core tables. | Press `Ctrl+P` or enter `/plan` to turn plan mode on |
 | Automated (trusted environments) | Executes an agreed workflow end to end with fewer prompts, once you are comfortable with the pattern. | Trusted, non-production or tightly controlled environments where the workflow has already been validated. | Use `Shift+Tab` to move into the more automated mode your team has approved for trusted environments. |
 
-| Prompt Use database MDM\_DEV and schema MDM\_AGG\_v001 for outputs. Create a Dynamic Table chain for customer golden records by combining the three CRM source tables in MDM\_DEV.MDM\_RAW\_v001 (CRMI\_RAW\_TB\_CUSTOMER\_A, CRMI\_RAW\_TB\_CUSTOMER\_B, CRMI\_RAW\_TB\_CUSTOMER\_C). The chain should produce: 1. An enriched layer that normalizes schemas and standardizes name fields 2. A groups layer that identifies which records belong to the same real-world customer using blocking and pairwise similarity scoring (Jaro-Winkler on names, exact match on email and phone) 3. A golden record layer that applies survivorship rules to pick the best attribute value per cluster 4. A current-state layer with one row per golden customer (latest version only) 5. A history layer that tracks all attribute changes over time (SCD Type 2 using SHA2 row hashing) Use REFRESH\_MODE = FULL and TARGET\_LAG = '24 hours'. |
+| Prompt Use database MDM\_DEV and schema MDM\_AGG\_v001 for outputs. Create a Dynamic Table chain for customer golden records by combining the three source tables in MDM\_DEV.MDM\_RAW\_v001 (CRMI\_RAW\_TB\_FREG, CRMI\_RAW\_TB\_BS, CRMI\_RAW\_TB\_NICE). The chain should produce: 1. An enriched layer that normalizes schemas, validates personnummer (modulus-11 checksum), and resolves Norwegian nickname pairs 2. A groups layer that identifies which records belong to the same real-world customer using: SSN+Name composite exact match as the primary key (confidence 100%), fuzzy Jaro-Winkler name matching as a fallback when SSN is absent, and a data steward queue flag for records that match neither 3. A golden record layer that applies org-partitioned survivorship (separate golden records for BANK and INS, trust order FREG > BS > NICE) 4. A current-state layer with one row per golden customer per organization (latest version only) 5. A history layer that tracks all attribute changes over time (SCD Type 2 using SHA2 row hashing) Also create a data steward queue Dynamic Table that surfaces unmatched records for manual review. Use REFRESH\_MODE = FULL and TARGET\_LAG = '60 minutes'. |
 | :---- |
 
 | What to look for |
 | :---- |
-| • A five-DT chain with readable SQL and explainable design choices at each layer. |
-| • Explicit survivorship rules (completeness → source trust → recency). |
-| • A matching threshold with a brief rationale. |
+| • A six-DT chain (enriched, groups, golden, current, history, steward queue) with readable SQL and explainable design choices at each layer. |
+| • Explicit survivorship rules: FREG=1 > BS=2 > NICE=3 for BANK; FREG=1, BS=NICE=2 tied for INS; Citizenship exception for BANK (FREG=BS=1). |
+| • The FREG org-broadcast pattern: since FREG has no Organization field, each FREG record must be CROSS JOINed with BANK and INS so it feeds both org-partitioned golden records. |
+| • A matching threshold with a brief rationale and explicit handling of NULL SSN records. |
 
 When finished we can exit plan mode. Make sure to keep plan mode off. (It should turn off by choosing yes to execute these actions above.)
 
@@ -198,20 +200,21 @@ In the first demo, Cortex Code helped you move from natural-language instruction
 
 **Scenario**
 
-A new requirement arrives: the organization must adapt the MDM pipeline for a Norwegian banking context. Three new source systems replace the generic CRM sources: FREG (Folkeregisteret — the Norwegian national population register, highest trust), BS (Bank System), and NICE (CRM, lowest trust). The matching logic must be updated to use personnummer (Norwegian SSN) as the primary match key. Norwegian data quality rules and address formats must be introduced.
+A new requirement arrives from the Sparebank 1 grunndata team. The base pipeline is running with FREG/BS/NICE sources and org-partitioned golden records — now the team needs three advanced POC scenarios demonstrated: a data steward workflow for records that could not be matched automatically, the ability to unmerge a previously matched golden record without redeploying the pipeline, and cross-organizational data exchange where BANK and INS can identify customers they share. A specification file (`MDM_SPEC_Bulk.md`) describes the full set of changes.
 
-This is a common kind of request. Rather than solving it once with a long prompt every time, you can standardize the workflow as a custom skill.
+This is a common kind of request: a structured spec arrives, and it needs to be translated into a concrete, reviewable engineering plan. Rather than solving it once with a long prompt every time, you can standardize the workflow as a custom skill.
 
 **Step 2.1 – Read the local specification**
 
 Start by understanding the business request before you design the skill. The specification file `MDM_SPEC_Bulk.md` is in your working directory.
 
-| Prompt Read the local file MDM\_SPEC\_Bulk.md. Summarize the changes that would be needed to adapt the MDM pipeline for a Norwegian banking use case. Return: \- New source systems being introduced and their trust levels \- New fields or business rules that affect the golden record pipeline \- Matching logic changes (new primary match key) \- Norwegian-specific data quality rules \- Ambiguities or open questions that should be resolved before implementation |
+| Prompt Read the local file MDM\_SPEC\_Bulk.md. Summarize the changes that would extend the existing Norwegian banking MDM pipeline with the three advanced POC scenarios. Return: \- What the data steward queue scenario requires (objects, UI surface, test cases) \- What the unmerge scenario requires (override table, DT chain interaction, durable demo steps) \- What the cross-org data exchange scenario requires (survivorship rule changes, not just a JOIN view) \- Ambiguities or open questions that should be resolved before implementation |
 | :---- |
 
 | What to look for |
 | :---- |
-| • A clear distinction between requirements and assumptions. |
+| • A clear distinction between what is already implemented and what is net-new. |
+| • The three scenarios broken out as independent workstreams with their own objects and test coverage. |
 | • The shape of the information your custom skill should standardize. |
 
 **Why Create a Custom Skill Here?**
@@ -264,7 +267,7 @@ Start by confirming it is available:
 
 Then ask the skill-development workflow to help you define the new custom skill.
 
-| Example Prompt This seems like a repeatable workflow I will have for many specification files. Walk me through \[Skill Attached: skill-development\] for building a project skill that will help me take specification files like MDM\_SPEC\_Bulk.md and turn them into a plan for updating a target MDM Dynamic Table chain. Define: \- When to use the skill \- What inputs it expects (for example, spec\_path and target\_dt\_chain) \- The exact outputs it should always return \- Best practices for surfacing assumptions and open questions instead of guessing \- An example usage for a Norwegian banking MDM pipeline update Requirements: \- Make it a project skill \- Put it under .cortex/skills/ in this demo repo \- Support markdown spec files |
+| Example Prompt This seems like a repeatable workflow I will have for many specification files. Walk me through \[Skill Attached: skill-development\] for building a project skill that will help me take specification files like MDM\_SPEC\_Bulk.md and turn them into a plan for extending a target MDM Dynamic Table chain. Define: \- When to use the skill \- What inputs it expects (for example, spec\_path and target\_dt\_chain) \- The exact outputs it should always return \- Best practices for surfacing assumptions and open questions instead of guessing \- An example usage for extending the Sparebank 1 MDM pipeline with data steward and unmerge scenarios Requirements: \- Make it a project skill \- Put it under .cortex/skills/ in this demo repo \- Support markdown spec files |
 | :---- |
 
 **What this skill should standardize**
@@ -295,7 +298,7 @@ In this case, the job is very specific: translate a specification file into a ch
 
 With the custom skill in place, invoke the workflow instead of rebuilding the logic from scratch. This is the step that turns a one-time prompt into a repeatable team asset.
 
-| Prompt Run the project skill we just made prd-to-mdm Context: \- spec\_path: MDM\_SPEC\_Bulk.md \- target\_dt\_chain: DT\_CUSTOMER\_ENRICHED\_FUZZY → DT\_CUSTOMER\_GROUPS\_FUZZY → DT\_CUSTOMER\_GOLDEN\_FUZZY → DT\_CUSTOMER\_FUZZY → DT\_CUSTOMER\_HISTORY\_FUZZY Return: 1\. Summary of requested changes 2\. Source-to-schema mapping summary (FREG/BS/NICE → unified schema) 3\. Open questions and assumptions 4\. DDL delta plan for the Dynamic Table chain 5\. Validation queries to run after implementation |
+| Prompt Run the project skill we just made prd-to-mdm Context: \- spec\_path: MDM\_SPEC\_Bulk.md \- target\_dt\_chain: DT\_CUSTOMER\_ENRICHED\_FUZZY → DT\_CUSTOMER\_GROUPS\_FUZZY → DT\_CUSTOMER\_GOLDEN\_FUZZY → DT\_CUSTOMER\_FUZZY → DT\_CUSTOMER\_HISTORY\_FUZZY Return: 1\. Summary of the three new POC scenarios (data steward queue, unmerge, cross-org exchange) 2\. Net-new objects required for each scenario 3\. Open questions and assumptions 4\. DDL delta plan for the Dynamic Table chain extensions 5\. Validation queries that prove each scenario works |
 | :---- |
 
 | What to look for |
@@ -308,20 +311,21 @@ With the custom skill in place, invoke the workflow instead of rebuilding the lo
 
 Now use the structured output from the skill to update the Dynamic Table chain. The engineering work is driven by both platform context (existing Snowflake objects) and external business context (the local specification file).
 
-| Prompt Update the MDM Dynamic Table chain in MDM\_DEV.MDM\_AGG\_v001 using the change plan from MDM\_SPEC\_Bulk.md. The update should: \- Replace CRM\_A, CRM\_B, CRM\_C with FREG, BS, and NICE as source systems \- Introduce personnummer (11-digit Norwegian SSN) as the primary exact match key (highest confidence) \- Keep Jaro-Winkler fuzzy matching as a fallback when SSN is absent \- Add Norwegian-specific DQ rules: phone format (+47 + 8 digits), 4-digit postnummer, SSN 11-digit format check \- Fix the name regex to include Norwegian characters (æ, ø, å) \- Partition golden records by ORGANIZATION (BANK and INS) Return: \- The updated Dynamic Table SQL \- A short explanation of how FREG data should be broadcast to both BANK and INS golden records \- Any assumptions that require engineering review \- Validation queries that prove the update worked |
+| Prompt Extend the MDM Dynamic Table chain in MDM\_DEV.MDM\_AGG\_v001 using the change plan from MDM\_SPEC\_Bulk.md. The update should add: 1\. A data steward queue Dynamic Table (DT\_CUSTOMER\_STEWARD\_QUEUE) that surfaces records where MATCH\_STATUS = 'STEWARD\_QUEUE' — no SSN and fuzzy score below threshold 2\. An unmerge override table (TB\_UNMERGE\_OVERRIDES) that the groups DT reads via a LEFT ANTI JOIN so inserting a row causes two golden records to split on the next DT refresh 3\. A cross-org 360 view (VW\_CUSTOMER\_360\_CROSS\_ORG) that joins BANK and INS golden records on SSN to show shared customers and updated survivorship rules for Scenario 6 Return: \- The new/updated SQL objects \- Demo steps for the unmerge scenario (INSERT → DT refresh → verify split) \- Any assumptions that require engineering review \- Validation queries for all three scenarios |
 | :---- |
 
 | What to look for |
 | :---- |
-| • Updated SQL, explainable source mapping, explicit assumptions, and validation queries. |
-| • Correct handling of the FREG broadcast — FREG has no Organization field so each FREG record must feed both BANK and INS golden records via a CROSS JOIN. |
-| **Save this output:** sql/03\_mdm\_norwegian\_update.sql |
+| • Three concrete new objects: steward queue DT, unmerge override table, and cross-org view. |
+| • Durable unmerge demo steps: INSERT a row into TB\_UNMERGE\_OVERRIDES → wait for DT refresh → verify the group splits into two golden records. |
+| • Cross-org view that reflects survivorship rule changes (not just a JOIN), so Scenario 6 shows golden records updating when the org-sharing agreement changes source priorities. |
+| **Save this output:** sql/03\_mdm\_advanced\_scenarios.sql |
 
 **Step 2.5 – Optional: save the handoff artifacts**
 
 If you are treating this as a real project rather than just a lab, finish by saving the change plan, validation queries, and a short note explaining what changed and why. In a Git-backed project, these files live alongside your SQL so another engineer can pull the repo, rerun the checks locally, and see exactly how the specification was applied.
 
-| Prompt List the artifacts I should save from this specification-driven MDM update so another engineer can review the change, rerun the checks, and reuse the PRD Evaluator skill for future specification files. |
+| Prompt List the artifacts I should save from this specification-driven MDM extension so another engineer can review the three new scenarios, rerun the validation queries, and reuse the PRD Evaluator skill for future specification files. |
 | :---- |
 
 | What to look for |
@@ -337,20 +341,20 @@ If you are treating this as a real project rather than just a lab, finish by sav
 
 Why this is optional: the quickstart is complete after Demo 2. Demo 3 is for teams that want to show what comes next: how the governed golden customer record data product you just built can support a focused Cortex data agent that answers business questions over trusted data rather than querying raw or fragmented CRM tables.
 
-Client story: By this point you have a curated golden customer record pipeline and a repeatable way to evolve it based on business requirements. That is the right moment to talk about agents, because you can keep the AI experience grounded in trusted, well-modeled data with transparent data quality scores.
+Client story: By this point you have a curated golden customer record pipeline partitioned by BANK and INS, a data steward queue, and a cross-org 360 view. That is the right moment to talk about agents, because you can keep the AI experience grounded in trusted, well-modeled Norwegian banking data with transparent data quality scores — rather than sending an agent loose over raw FREG/BS/NICE source tables.
 
 **Step 3.1 – Define the agent use case**
 
 Keep the first pass narrow and grounded in the data product you built. The goal is to make the agent credible, not broad.
 
-| Prompt Help me define a Cortex data agent on top of DT\_CUSTOMER\_FUZZY in MDM\_DEV.MDM\_AGG\_v001. Suggest: \- The primary audience (for example, sales, compliance, data stewards) \- The top five business questions the agent should answer \- Guardrails that keep the agent grounded in the curated golden records rather than raw CRM data \- Any semantic descriptions that would improve answer quality |
+| Prompt Help me define a Cortex data agent on top of DT\_CUSTOMER\_FUZZY in MDM\_DEV.MDM\_AGG\_v001. Suggest: \- The primary audience (for example, data stewards, compliance, banking operations) \- The top five business questions the agent should answer — include questions that span BANK and INS organizations, and questions about the data steward queue \- Guardrails that keep the agent grounded in the curated golden records rather than raw FREG/BS/NICE source tables \- Any semantic descriptions that would improve answer quality for Norwegian banking context |
 | :---- |
 
 **Step 3.2 – Create a semantic view over the golden records**
 
 Create a semantic view that exposes business-friendly dimensions and measures. This is the object the agent will rely on for most of its answers.
 
-| Prompt Let's start by building the semantic model using the $semantic-view Create a semantic view called SV\_CUSTOMER\_360 over MDM\_DEV.MDM\_AGG\_v001.DT\_CUSTOMER\_FUZZY. It should support natural language questions like: \- "How many unique customers do we have across all CRM sources?" \- "What is the average data quality score by source system?" \- "Which customers appear in both BANK and INS organizations?" \- "Show me customers with a DQ score below 60" Return: \- A complete semantic view definition that clearly names business measures and dimensions. \- Any assumptions you are making about grain, the golden record identifier, and how source systems are tracked. |
+| Prompt Let's start by building the semantic model using the $semantic-view Create a semantic view called SV\_CUSTOMER\_360 over MDM\_DEV.MDM\_AGG\_v001.DT\_CUSTOMER\_FUZZY. It should support natural language questions like: \- "How many unique golden customer records do we have in BANK vs INS?" \- "What is the average data quality score by source system (FREG / BS / NICE)?" \- "Which customers appear in both BANK and INS — use the cross-org view" \- "How many records are currently in the data steward queue waiting for manual review?" \- "Show me customers with a DQ score below 60 in the INS organization" Return: \- A complete semantic view definition that clearly names business measures and dimensions. \- Any assumptions about grain (one row per golden customer per organization), the golden record identifier, and how ORGANIZATION is modeled as a dimension. |
 | :---- |
 
 | What to look for |
@@ -362,7 +366,7 @@ Create a semantic view that exposes business-friendly dimensions and measures. T
 
 Now create a Cortex data agent that uses the semantic view to answer natural-language questions. Keep the agent grounded in SV\_CUSTOMER\_360 and make its answers verifiable.
 
-| Prompt $cortex-agent Create an agent named CUSTOMER\_360\_ASSISTANT. The agent should: \- Prefer SV\_CUSTOMER\_360 as its primary data source. \- Always respond with three parts: (1) the final answer, (2) the SQL used, and (3) any assumptions about grain or filters. \- Ask a clarifying question if the requested metric or time grain is ambiguous. \- Never query raw CRM source tables directly — always use the golden record layer. Return a configuration I can save alongside my project files. |
+| Prompt $cortex-agent Create an agent named CUSTOMER\_360\_ASSISTANT. The agent should: \- Prefer SV\_CUSTOMER\_360 as its primary data source. \- Always respond with three parts: (1) the final answer, (2) the SQL used, and (3) any assumptions about grain or filters. \- Ask a clarifying question if the requested metric or time grain is ambiguous. \- Never query raw FREG/BS/NICE source tables directly — always use the golden record layer or the cross-org 360 view. Return a configuration I can save alongside my project files. |
 | :---- |
 
 **Step 3.4 – Evaluate Agent Semantic View**
@@ -380,4 +384,4 @@ With the agent created, let's dive deeper into how we can improve this agent. We
 Take a deeper look at the skills and workflow that exist in cortex-agent and semantic-view. Here we can see how many teams take the next step in iteration on their agents. From taking the results of their evaluation datasets or user feedback to suggest iterations, performing tests of their verified queries on their semantic models, or auditing their semantic models for best practices.
 
 **What You Should Take Away**
-The core pattern is simple: pick one concrete object, ask Cortex Code for one concrete artifact, and keep the result in the project. In Demo 1, that means a five-layer MDM Dynamic Table chain, a small runbook from a bundled skill, and a single proof query you can rerun after every change. In Demo 2, it means treating the specification file and its evaluator as part of the same data product, with a custom skill that turns a business requirements document into a structured, reviewable change plan. By the time you reach the optional agent design in Demo 3, you can see how bundled skills and custom skills together create a path from disciplined data engineering to a credible AI experience built on trusted, governed customer data.
+The core pattern is simple: pick one concrete object, ask Cortex Code for one concrete artifact, and keep the result in the project. In Demo 1, that means a five-layer MDM Dynamic Table chain, a small runbook from a bundled skill, and a single proof query you can rerun after every change. In Demo 2, it means treating the specification file and its evaluator as part of the same data product, with a custom skill that turns a business requirements document into a structured, reviewable change plan for extending the pipeline with advanced scenarios (data steward queue, unmerge, cross-org exchange). By the time you reach the optional agent design in Demo 3, you can see how bundled skills and custom skills together create a path from disciplined data engineering to a credible AI experience built on trusted, governed customer data.
