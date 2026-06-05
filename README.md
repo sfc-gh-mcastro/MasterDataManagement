@@ -409,12 +409,12 @@ uv run --with faker shared/scripts/generate_test_data.py
 bash bulk/upload_data.sh --CONNECTION_NAME=<connection>
 
 # 5b. (Optional) Trigger ingestion tasks immediately instead of waiting up to 60 min
-snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_CUSTOMER_A"  -c <connection>
-snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_CUSTOMER_B"  -c <connection>
-snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_CUSTOMER_C"  -c <connection>
-snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_ADDRESSES_A" -c <connection>
-snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_ADDRESSES_B" -c <connection>
-snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_ADDRESSES_C" -c <connection>
+snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_FREG"  -c <connection>
+snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_BS"  -c <connection>
+snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_NICE"  -c <connection>
+snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_ADDRESSES_FREG" -c <connection>
+snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_ADDRESSES_BS" -c <connection>
+snow sql -q "EXECUTE TASK MDM_DEV.MDM_RAW_v001.CRMI_RAW_TS_LOAD_ADDRESSES_NICE" -c <connection>
 
 # 6. Dashboard
 cd app && streamlit run streamlit_app.py
