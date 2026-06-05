@@ -392,13 +392,7 @@ MasterDataManagement/
 
 ```bash
 # 1. Pre-deploy: database + schemas
-snow sql -f pre_deploy.sql \
-  -D db=MDM_DEV \
-  -D warehouse=MD_TEST_WH \
-  -D raw_schema=MDM_RAW_v001 \
-  -D agg_schema=MDM_AGG_v001 \
-  -D srv_schema=MDM_SRV_v001 \
-  -c <connection>
+snow sql -f pre_deploy.sql -c <connection>
 
 # 2. DCM analyze + plan + deploy
 snow dcm raw-analyze MDM_DEV.MDM_DCM.MDM_PROJECT -c <connection> --target DEV
