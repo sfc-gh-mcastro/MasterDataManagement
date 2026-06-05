@@ -487,13 +487,13 @@ WITH versioned AS (
     SELECT customer_group_id, organization, address_type, gate, postnummer, "BY", land, is_primary, dq_score, row_timestamp,
         SHA2(CONCAT(
             COALESCE(address_type, ''), '|', COALESCE(gate, ''),       '|',
-            COALESCE(postnummer,   ''), '|', COALESCE(by, ''),         '|',
+            COALESCE(postnummer,   ''), '|', COALESCE("BY", ''),         '|',
             COALESCE(land,         ''), '|', COALESCE(is_primary::VARCHAR, ''), '|',
             COALESCE(dq_score::VARCHAR, '')
         )) AS row_hash,
         LAG(SHA2(CONCAT(
             COALESCE(address_type, ''), '|', COALESCE(gate, ''),       '|',
-            COALESCE(postnummer,   ''), '|', COALESCE(by, ''),         '|',
+            COALESCE(postnummer,   ''), '|', COALESCE("BY", ''),         '|',
             COALESCE(land,         ''), '|', COALESCE(is_primary::VARCHAR, ''), '|',
             COALESCE(dq_score::VARCHAR, '')
         ))) OVER (PARTITION BY customer_group_id, organization ORDER BY row_timestamp) AS prev_hash
@@ -963,13 +963,13 @@ WITH versioned AS (
     SELECT customer_group_id, organization, address_type, gate, postnummer, "BY", land, is_primary, dq_score, row_timestamp,
         SHA2(CONCAT(
             COALESCE(address_type, ''), '|', COALESCE(gate, ''),       '|',
-            COALESCE(postnummer,   ''), '|', COALESCE(by, ''),         '|',
+            COALESCE(postnummer,   ''), '|', COALESCE("BY", ''),         '|',
             COALESCE(land,         ''), '|', COALESCE(is_primary::VARCHAR, ''), '|',
             COALESCE(dq_score::VARCHAR, '')
         )) AS row_hash,
         LAG(SHA2(CONCAT(
             COALESCE(address_type, ''), '|', COALESCE(gate, ''),       '|',
-            COALESCE(postnummer,   ''), '|', COALESCE(by, ''),         '|',
+            COALESCE(postnummer,   ''), '|', COALESCE("BY", ''),         '|',
             COALESCE(land,         ''), '|', COALESCE(is_primary::VARCHAR, ''), '|',
             COALESCE(dq_score::VARCHAR, '')
         ))) OVER (PARTITION BY customer_group_id, organization ORDER BY row_timestamp) AS prev_hash
