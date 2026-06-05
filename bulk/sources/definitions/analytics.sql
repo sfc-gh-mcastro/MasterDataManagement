@@ -1,7 +1,7 @@
 -- =============================================================================
 -- analytics.sql — Dynamic Table chain for Norwegian banking MDM pipeline
 -- Sources: FREG (Folkeregisteret), BS (Bank System), NICE (CRM)
--- Organizations: BANK and INS — golden records partitioned by (group, org)
+-- Organizations: BANK and INS — golden records partitioned "BY" (group, org)
 -- Two isolated implementations: AI (Cortex-powered) and FUZZY (classical)
 -- =============================================================================
 
@@ -56,7 +56,7 @@ DEFINE DYNAMIC TABLE {{db}}.{{agg_schema}}.CRMA_AGG_DT_CUSTOMER_GROUPS_AI
     WAREHOUSE = {{warehouse}}
     TARGET_LAG = '{{dt_lag}}'
     REFRESH_MODE = FULL
-    COMMENT = 'Entity resolution for Norwegian MDM. Blocking: SSN bucket OR SOUNDEX(last_name)+birth-year. Partitioned by ORGANIZATION. Match rules: D01/D01b/D02/FUZZY. AI pipeline.'
+    COMMENT = 'Entity resolution for Norwegian MDM. Blocking: SSN bucket OR SOUNDEX(last_name)+birth-year. Partitioned "BY" ORGANIZATION. Match rules: D01/D01b/D02/FUZZY. AI pipeline.'
 AS
 WITH base AS (
     SELECT DISTINCT
@@ -414,7 +414,7 @@ AS
 WITH grouped AS (
     SELECT
         g.address_id, g.customer_group_id, g.organization, g.source_system, g.source_key,
-        u.gate, u.postnummer, u.by, u.land, u.row_timestamp,
+        u.gate, u.postnummer, u."BY", u.land, u.row_timestamp,
         CASE g.source_system WHEN 'FREG' THEN 1 WHEN 'BS' THEN 2 ELSE 3 END AS source_priority
     FROM {{db}}.{{agg_schema}}.CRMA_AGG_DT_ADDRESSES_GROUPS_AI g
     JOIN {{db}}.{{agg_schema}}.CRMA_AGG_VW_ADDRESSES_UNION u
@@ -432,11 +432,11 @@ survivorship AS (
             ORDER BY CASE WHEN postnummer IS NOT NULL THEN 0 ELSE 1 END,
                      source_priority, row_timestamp DESC
         ) AS postnummer,
-        FIRST_VALUE(by) OVER (
+        FIRST_VALUE("BY") OVER (
             PARTITION BY customer_group_id, organization
-            ORDER BY CASE WHEN by IS NOT NULL THEN 0 ELSE 1 END,
+            ORDER BY CASE WHEN "BY" IS NOT NULL THEN 0 ELSE 1 END,
                      source_priority, row_timestamp DESC
-        ) AS by,
+        ) AS "BY",
         FIRST_VALUE(land) OVER (
             PARTITION BY customer_group_id, organization
             ORDER BY CASE WHEN land IS NOT NULL THEN source_priority ELSE 99 END,
@@ -448,12 +448,12 @@ survivorship AS (
     ) = 1
 ),
 dq_rules AS (
-    SELECT customer_group_id, organization, gate, postnummer, by, land, row_timestamp,
+    SELECT customer_group_id, organization, gate, postnummer, "BY", land, row_timestamp,
         100
         + CASE WHEN gate IS NULL OR LENGTH(TRIM(gate)) < 3 THEN -5 ELSE 0 END
-        + CASE WHEN by IS NULL THEN -20 ELSE 0 END
+        + CASE WHEN "BY" IS NULL THEN -20 ELSE 0 END
         + CASE WHEN gate IS NOT NULL AND LENGTH(TRIM(gate)) >= 3
-                   AND postnummer IS NOT NULL AND by IS NOT NULL THEN 10 ELSE 0 END
+                   AND postnummer IS NOT NULL AND "BY" IS NOT NULL THEN 10 ELSE 0 END
         -- DQ-N02: Norwegian postnummer must be exactly 4 digits
         + CASE WHEN postnummer IS NOT NULL AND NOT RLIKE(postnummer, '^[0-9]{4}$') THEN -5 ELSE 0 END
         AS raw_dq_score
@@ -461,7 +461,7 @@ dq_rules AS (
 )
 SELECT
     customer_group_id, organization, 'PRIMARY' AS address_type,
-    gate, postnummer, by, land, TRUE AS is_primary, row_timestamp,
+    gate, postnummer, "BY", land, TRUE AS is_primary, row_timestamp,
     GREATEST(0, LEAST(100, raw_dq_score)) AS dq_score
 FROM dq_rules;
 
@@ -472,7 +472,7 @@ DEFINE DYNAMIC TABLE {{db}}.{{agg_schema}}.CRMA_AGG_DT_ADDRESSES_AI
     REFRESH_MODE = FULL
     COMMENT = 'Current golden Norwegian address per customer-org (latest version only). AI pipeline.'
 AS
-SELECT customer_group_id, organization, address_type, gate, postnummer, by, land, is_primary, dq_score
+SELECT customer_group_id, organization, address_type, gate, postnummer, "BY", land, is_primary, dq_score
 FROM {{db}}.{{agg_schema}}.CRMA_AGG_DT_ADDRESSES_GOLDEN_AI
 QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_group_id, organization ORDER BY row_timestamp DESC) = 1;
 
@@ -484,7 +484,7 @@ DEFINE DYNAMIC TABLE {{db}}.{{agg_schema}}.CRMA_AGG_DT_ADDRESSES_HISTORY_AI
     COMMENT = 'SCD Type 2 Norwegian address history. AI pipeline.'
 AS
 WITH versioned AS (
-    SELECT customer_group_id, organization, address_type, gate, postnummer, by, land, is_primary, dq_score, row_timestamp,
+    SELECT customer_group_id, organization, address_type, gate, postnummer, "BY", land, is_primary, dq_score, row_timestamp,
         SHA2(CONCAT(
             COALESCE(address_type, ''), '|', COALESCE(gate, ''),       '|',
             COALESCE(postnummer,   ''), '|', COALESCE(by, ''),         '|',
@@ -501,7 +501,7 @@ WITH versioned AS (
 ),
 changes AS (SELECT * FROM versioned WHERE prev_hash IS NULL OR row_hash != prev_hash),
 scd2 AS (
-    SELECT customer_group_id, organization, address_type, gate, postnummer, by, land, is_primary, dq_score,
+    SELECT customer_group_id, organization, address_type, gate, postnummer, "BY", land, is_primary, dq_score,
         row_timestamp AS valid_from,
         COALESCE(
             LEAD(row_timestamp) OVER (PARTITION BY customer_group_id, organization ORDER BY row_timestamp),
@@ -510,7 +510,7 @@ scd2 AS (
         row_hash
     FROM changes
 )
-SELECT customer_group_id, organization, address_type, gate, postnummer, by, land, is_primary, dq_score,
+SELECT customer_group_id, organization, address_type, gate, postnummer, "BY", land, is_primary, dq_score,
     valid_from, valid_to,
     CASE WHEN valid_to = '9999-12-31'::TIMESTAMP_LTZ THEN TRUE ELSE FALSE END AS is_valid,
     row_hash
@@ -556,7 +556,7 @@ DEFINE DYNAMIC TABLE {{db}}.{{agg_schema}}.CRMA_AGG_DT_CUSTOMER_GROUPS_FUZZY
     WAREHOUSE = {{warehouse}}
     TARGET_LAG = '{{dt_lag}}'
     REFRESH_MODE = FULL
-    COMMENT = 'Entity resolution for Norwegian MDM. Blocking: SSN bucket OR SOUNDEX(last_name)+birth-year. Partitioned by ORGANIZATION. Match rules: D01/D01b/D02/FUZZY. Fuzzy pipeline.'
+    COMMENT = 'Entity resolution for Norwegian MDM. Blocking: SSN bucket OR SOUNDEX(last_name)+birth-year. Partitioned "BY" ORGANIZATION. Match rules: D01/D01b/D02/FUZZY. Fuzzy pipeline.'
 AS
 WITH base AS (
     SELECT DISTINCT
@@ -893,7 +893,7 @@ AS
 WITH grouped AS (
     SELECT
         g.address_id, g.customer_group_id, g.organization, g.source_system, g.source_key,
-        u.gate, u.postnummer, u.by, u.land, u.row_timestamp,
+        u.gate, u.postnummer, u."BY", u.land, u.row_timestamp,
         CASE g.source_system WHEN 'FREG' THEN 1 WHEN 'BS' THEN 2 ELSE 3 END AS source_priority
     FROM {{db}}.{{agg_schema}}.CRMA_AGG_DT_ADDRESSES_GROUPS_FUZZY g
     JOIN {{db}}.{{agg_schema}}.CRMA_AGG_VW_ADDRESSES_UNION u
@@ -911,11 +911,11 @@ survivorship AS (
             ORDER BY CASE WHEN postnummer IS NOT NULL THEN 0 ELSE 1 END,
                      source_priority, row_timestamp DESC
         ) AS postnummer,
-        FIRST_VALUE(by) OVER (
+        FIRST_VALUE("BY") OVER (
             PARTITION BY customer_group_id, organization
-            ORDER BY CASE WHEN by IS NOT NULL THEN 0 ELSE 1 END,
+            ORDER BY CASE WHEN "BY" IS NOT NULL THEN 0 ELSE 1 END,
                      source_priority, row_timestamp DESC
-        ) AS by,
+        ) AS "BY",
         FIRST_VALUE(land) OVER (
             PARTITION BY customer_group_id, organization
             ORDER BY CASE WHEN land IS NOT NULL THEN source_priority ELSE 99 END,
@@ -925,19 +925,19 @@ survivorship AS (
     QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_group_id, organization ORDER BY source_priority) = 1
 ),
 dq_rules AS (
-    SELECT customer_group_id, organization, gate, postnummer, by, land, row_timestamp,
+    SELECT customer_group_id, organization, gate, postnummer, "BY", land, row_timestamp,
         100
         + CASE WHEN gate IS NULL OR LENGTH(TRIM(gate)) < 3 THEN -5 ELSE 0 END
-        + CASE WHEN by IS NULL THEN -20 ELSE 0 END
+        + CASE WHEN "BY" IS NULL THEN -20 ELSE 0 END
         + CASE WHEN gate IS NOT NULL AND LENGTH(TRIM(gate)) >= 3
-                   AND postnummer IS NOT NULL AND by IS NOT NULL THEN 10 ELSE 0 END
+                   AND postnummer IS NOT NULL AND "BY" IS NOT NULL THEN 10 ELSE 0 END
         + CASE WHEN postnummer IS NOT NULL AND NOT RLIKE(postnummer, '^[0-9]{4}$') THEN -5 ELSE 0 END
         AS raw_dq_score
     FROM survivorship
 )
 SELECT
     customer_group_id, organization, 'PRIMARY' AS address_type,
-    gate, postnummer, by, land, TRUE AS is_primary, row_timestamp,
+    gate, postnummer, "BY", land, TRUE AS is_primary, row_timestamp,
     GREATEST(0, LEAST(100, raw_dq_score)) AS dq_score
 FROM dq_rules;
 
@@ -948,7 +948,7 @@ DEFINE DYNAMIC TABLE {{db}}.{{agg_schema}}.CRMA_AGG_DT_ADDRESSES_FUZZY
     REFRESH_MODE = FULL
     COMMENT = 'Current golden Norwegian address per customer-org (latest version only). Fuzzy pipeline.'
 AS
-SELECT customer_group_id, organization, address_type, gate, postnummer, by, land, is_primary, dq_score
+SELECT customer_group_id, organization, address_type, gate, postnummer, "BY", land, is_primary, dq_score
 FROM {{db}}.{{agg_schema}}.CRMA_AGG_DT_ADDRESSES_GOLDEN_FUZZY
 QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_group_id, organization ORDER BY row_timestamp DESC) = 1;
 
@@ -960,7 +960,7 @@ DEFINE DYNAMIC TABLE {{db}}.{{agg_schema}}.CRMA_AGG_DT_ADDRESSES_HISTORY_FUZZY
     COMMENT = 'SCD Type 2 Norwegian address history. Fuzzy pipeline.'
 AS
 WITH versioned AS (
-    SELECT customer_group_id, organization, address_type, gate, postnummer, by, land, is_primary, dq_score, row_timestamp,
+    SELECT customer_group_id, organization, address_type, gate, postnummer, "BY", land, is_primary, dq_score, row_timestamp,
         SHA2(CONCAT(
             COALESCE(address_type, ''), '|', COALESCE(gate, ''),       '|',
             COALESCE(postnummer,   ''), '|', COALESCE(by, ''),         '|',
@@ -977,7 +977,7 @@ WITH versioned AS (
 ),
 changes AS (SELECT * FROM versioned WHERE prev_hash IS NULL OR row_hash != prev_hash),
 scd2 AS (
-    SELECT customer_group_id, organization, address_type, gate, postnummer, by, land, is_primary, dq_score,
+    SELECT customer_group_id, organization, address_type, gate, postnummer, "BY", land, is_primary, dq_score,
         row_timestamp AS valid_from,
         COALESCE(
             LEAD(row_timestamp) OVER (PARTITION BY customer_group_id, organization ORDER BY row_timestamp),
@@ -986,7 +986,7 @@ scd2 AS (
         row_hash
     FROM changes
 )
-SELECT customer_group_id, organization, address_type, gate, postnummer, by, land, is_primary, dq_score,
+SELECT customer_group_id, organization, address_type, gate, postnummer, "BY", land, is_primary, dq_score,
     valid_from, valid_to,
     CASE WHEN valid_to = '9999-12-31'::TIMESTAMP_LTZ THEN TRUE ELSE FALSE END AS is_valid,
     row_hash

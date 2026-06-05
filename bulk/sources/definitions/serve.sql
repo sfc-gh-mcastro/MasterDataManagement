@@ -37,7 +37,7 @@ AS
 SELECT c.customer_group_id, c.first_name, c.last_name, c.email, c.phone, c.dq_score,
     CASE WHEN c.dq_score >= 90 THEN 'Excellent' WHEN c.dq_score >= 70 THEN 'Good' WHEN c.dq_score >= 50 THEN 'Fair' ELSE 'Poor' END AS dq_tier,
     c.source_count, c.last_updated, c.ssn, c.birth_date, c.citizenship, c.organization, c.mdm_processed_date,
-    a.address_id, a.address_type, a.gate, a."BY" AS by, a.postnummer, a.land, a.is_primary, a.dq_score AS address_dq_score
+    a.address_id, a.address_type, a.gate, a."BY" AS city, a.postnummer, a.land, a.is_primary, a.dq_score AS address_dq_score
 FROM {{db}}.{{agg_schema}}.CRMA_AGG_DT_CUSTOMER_AI c
 LEFT JOIN {{db}}.{{agg_schema}}.CRMA_AGG_DT_ADDRESSES_AI a ON a.customer_group_id = c.customer_group_id AND a.organization = c.organization;
 
@@ -76,7 +76,7 @@ AS
 SELECT c.customer_group_id, c.first_name, c.last_name, c.email, c.phone, c.dq_score,
     CASE WHEN c.dq_score >= 90 THEN 'Excellent' WHEN c.dq_score >= 70 THEN 'Good' WHEN c.dq_score >= 50 THEN 'Fair' ELSE 'Poor' END AS dq_tier,
     c.source_count, c.last_updated, c.ssn, c.birth_date, c.citizenship, c.organization, c.mdm_processed_date,
-    a.address_id, a.address_type, a.gate, a."BY" AS by, a.postnummer, a.land, a.is_primary, a.dq_score AS address_dq_score
+    a.address_id, a.address_type, a.gate, a."BY" AS city, a.postnummer, a.land, a.is_primary, a.dq_score AS address_dq_score
 FROM {{db}}.{{agg_schema}}.CRMA_AGG_DT_CUSTOMER_FUZZY c
 LEFT JOIN {{db}}.{{agg_schema}}.CRMA_AGG_DT_ADDRESSES_FUZZY a ON a.customer_group_id = c.customer_group_id AND a.organization = c.organization;
 
