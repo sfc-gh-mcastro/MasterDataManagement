@@ -393,7 +393,6 @@ MasterDataManagement/
 ```bash
 # 1. Pre-deploy: database + schemas
 snow sql -f pre_deploy.sql \
-  --enable-templating JINJA \
   -D db=MDM_DEV \
   -D warehouse=MD_TEST_WH \
   -D raw_schema=MDM_RAW_v001 \
@@ -408,7 +407,6 @@ snow dcm deploy MDM_DEV.MDM_DCM.MDM_PROJECT -c <connection> --target DEV
 
 # 3. Post-deploy: file formats, streams, tasks
 snow sql -f post_deploy.sql \
-  --enable-templating JINJA \
   -D db=MDM_DEV \
   -D raw_schema=MDM_RAW_v001 \
   -D agg_schema=MDM_AGG_v001 \
