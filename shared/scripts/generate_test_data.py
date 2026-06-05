@@ -1,911 +1,812 @@
 #!/usr/bin/env python3
 """
 generate_test_data.py
-Test Data Generator for MDM Showcase
+Norwegian MDM Test Data Generator for Sparebank 1 POC
 
-Generates synthetic CRM data that exercises all matching and survivorship rules:
-- Deterministic matches (email, phone)
-- Probabilistic matches (fuzzy name, address similarity, SOUNDEX)
-- Survivorship scenarios (most recent, source priority, most complete)
-- DQ rule violations and bonuses
+Generates synthetic data for three source systems:
+  FREG  — Folkeregisteret (national population register, highest trust)
+  BS    — Bank System (mid trust)
+  NICE  — CRM system (lowest trust)
+
+Embedded MDM scenarios:
+  1. ~200 shared persons: exact SSN+name match across FREG/BS/NICE
+  2. ~50 fuzzy-only:  BS has SSN; NICE has same phone but NO SSN
+  3.   5 data steward: NICE, no SSN, unique name — no match anywhere
+  4. ~30 cross-org:   same person (same SSN) in both BANK and INS in BS
+  5.   8 nickname pairs: FREG canonical / BS nickname — Cortex AI scenario
 """
 
+import calendar
 import csv
 import os
 import random
 import shutil
-import string
-from datetime import datetime, timedelta, timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from faker import Faker
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'output')
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-fake = Faker()
+fake = Faker('no_NO')
 Faker.seed(42)
 random.seed(42)
 
-DISPOSABLE_DOMAINS = ['mailinator.com', 'tempmail.com', 'guerrillamail.com', '10minutemail.com']
-PLACEHOLDER_PHONES = ['0000000000', '1111111111', '1234567890']
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+SOURCE_FREG = 'FREG'
+SOURCE_BS   = 'BS'
+SOURCE_NICE = 'NICE'
+ORG_BANK    = 'BANK'
+ORG_INS     = 'INS'
+
+NO_STREETS = [
+    'Storgata', 'Kirkeveien', 'Osloveien', 'Parkveien', 'Skoleveien',
+    'Fjordveien', 'Bergveien', 'Nesveien', 'Søndre gate', 'Nordre gate',
+    'Langveien', 'Dronningens gate', 'Kongens gate', 'Torggata', 'Markveien',
+    'Bygdøy allé', 'Trondheimsveien', 'Sandakerveien', 'Maridalsveien', 'Holmenveien',
+]
+
+NO_CITIES = [
+    'Oslo', 'Bergen', 'Trondheim', 'Stavanger', 'Kristiansand',
+    'Tromsø', 'Fredrikstad', 'Sandnes', 'Drammen', 'Sarpsborg',
+    'Bodø', 'Ålesund', 'Hamar', 'Lillestrøm', 'Moss',
+]
+
+# 90 % Norwegian, 10 % other
+CITIZENSHIPS = ['NO'] * 90 + ['SE'] * 4 + ['PL'] * 3 + ['LT'] * 3
+
+# Cortex AI test: canonical ↔ nickname pairs
+NORWEGIAN_NICKNAME_PAIRS = [
+    ('Per',  'Petter'),
+    ('Kari', 'Karen'),
+    ('Ole',  'Olav'),
+    ('Jon',  'Jonas'),
+    ('Lise', 'Elisabeth'),
+    ('Tor',  'Torben'),
+    ('Mari', 'Maria'),
+    ('Hans', 'Johan'),
+]
+
+# Data steward queue: unique foreign names — guaranteed no SSN + no fuzzy match
+STEWARD_QUEUE_NAMES = [
+    ('Zygmunt',    'Wierzbicki'),
+    ('Bartholomew','Throgmorton'),
+    ('Xiomara',    'Felicissimo'),
+    ('Oswaldo',    'Baumgartner'),
+    ('Perpetua',   'Quisenberry'),
+]
+
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
 
 @dataclass
-class Customer:
+class NorwegianCustomer:
     id: str
-    first_name: Optional[str]
-    last_name: Optional[str]
-    email: Optional[str]
+    ssn: Optional[str]          # 11-digit personnummer; None for some NICE records
+    first_name: str
+    last_name: str
+    birth_date: Optional[date]  # Populated for FREG (derived from SSN)
+    citizenship: Optional[str]  # Populated for FREG only
     phone: Optional[str]
+    email: Optional[str]
+    record_date: date
+    organization: Optional[str] # BANK | INS; None for FREG
+    source: str                 # FREG | BS | NICE
+
 
 @dataclass
-class Address:
+class NorwegianAddress:
     id: str
-    customer_id: str
-    street: Optional[str]
-    city: Optional[str]
-    postal_code: Optional[str]
-    country: Optional[str]
+    customer_id: str            # FK to NorwegianCustomer.id
+    gate: str
+    postnummer: str             # 4-digit zero-padded
+    by: str
+    land: str
 
 
-def generate_phone(format_type: str = 'full') -> str:
-    """Generate phone in various formats to test normalization."""
-    digits = ''.join([str(random.randint(0, 9)) for _ in range(10)])
-    if format_type == 'full':
-        return f"+1{digits}"
-    elif format_type == 'dashes':
-        return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
-    elif format_type == 'parens':
-        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
-    elif format_type == 'short':
-        return digits[3:]
+# ---------------------------------------------------------------------------
+# Personnummer (modulus-11)
+# ---------------------------------------------------------------------------
+
+def generate_personnummer(birth_date: Optional[date] = None):
+    """Generate a valid Norwegian personnummer.
+
+    Format: DDMMYY + 3-digit individual number (001–499 for 1900-1999) + 2 check digits.
+
+    Check digit algorithm (modulus-11):
+      c1 weights [3,7,6,1,8,9,4,5,2] over digits 0-8
+      c2 weights [5,4,3,2,7,6,5,4,3,2] over digits 0-9
+      result = 11 − (sum % 11)
+        if result == 10 → invalid, regenerate with different individual number
+        if result == 11 → treat as 0
+
+    Returns (personnummer_str, birth_date).
+    """
+    if birth_date is None:
+        year  = random.randint(1940, 2000)
+        month = random.randint(1, 12)
+        day   = random.randint(1, calendar.monthrange(year, month)[1])
+        bd    = date(year, month, day)
     else:
-        return digits
+        bd = birth_date
+
+    dd = f"{bd.day:02d}"
+    mm = f"{bd.month:02d}"
+    yy = f"{bd.year % 100:02d}"
+
+    c1_weights = [3, 7, 6, 1, 8, 9, 4, 5, 2]
+    c2_weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
+
+    for _ in range(1000):
+        ind     = random.randint(1, 499)
+        ind_str = f"{ind:03d}"
+        digits  = [int(c) for c in dd + mm + yy + ind_str]   # 9 digits
+
+        c1_raw = 11 - (sum(w * d for w, d in zip(c1_weights, digits)) % 11)
+        if c1_raw == 10:
+            continue
+        c1 = 0 if c1_raw == 11 else c1_raw
+
+        digits_10 = digits + [c1]                             # 10 digits
+        c2_raw    = 11 - (sum(w * d for w, d in zip(c2_weights, digits_10)) % 11)
+        if c2_raw == 10:
+            continue
+        c2 = 0 if c2_raw == 11 else c2_raw
+
+        return dd + mm + yy + ind_str + str(c1) + str(c2), bd
+
+    raise ValueError(f"Could not generate valid personnummer for {bd}")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def generate_norwegian_phone() -> str:
+    """Return a Norwegian mobile number: +47 followed by 8 digits, first digit 9 or 4."""
+    prefix = random.choice(['9', '4'])
+    rest   = ''.join(str(random.randint(0, 9)) for _ in range(7))
+    return f"+47{prefix}{rest}"
+
+
+def generate_email(first_name: str, last_name: str) -> str:
+    """Generate a plausible Norwegian email address."""
+    domains  = ['gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.no', 'online.no']
+    first    = first_name.lower().replace('æ','ae').replace('ø','o').replace('å','a')
+    last     = last_name.lower().replace('æ','ae').replace('ø','o').replace('å','a')
+    patterns = [
+        f"{first}.{last}@{random.choice(domains)}",
+        f"{first}{last[0]}@{random.choice(domains)}",
+        f"{first[0]}{last}@{random.choice(domains)}",
+        f"{first}{random.randint(1,99)}@{random.choice(domains)}",
+    ]
+    return random.choice(patterns)
 
 
 def typo_name(name: str) -> str:
-    """Introduce typos for fuzzy matching tests (Jaro-Winkler ~85%)."""
+    """Introduce a realistic single-character typo (Jaro-Winkler ~85 %)."""
     if len(name) < 3:
         return name
-    ops = ['swap', 'drop', 'replace']
-    op = random.choice(ops)
+    op  = random.choice(['swap', 'drop', 'replace'])
     idx = random.randint(1, len(name) - 2)
     if op == 'swap' and idx < len(name) - 1:
         return name[:idx] + name[idx+1] + name[idx] + name[idx+2:]
-    elif op == 'drop':
+    if op == 'drop':
         return name[:idx] + name[idx+1:]
-    elif op == 'replace':
-        similar = {'a': 'e', 'e': 'i', 'i': 'y', 'o': 'u', 's': 'z', 'c': 'k'}
-        char = name[idx].lower()
-        replacement = similar.get(char, char)
-        return name[:idx] + replacement + name[idx+1:]
-    return name
+    similar = {'a':'e','e':'i','i':'y','o':'u','s':'z',
+               'n':'m','r':'l','k':'g','ø':'o','æ':'a','å':'a'}
+    return name[:idx] + similar.get(name[idx].lower(), name[idx]) + name[idx+1:]
 
 
-CORTEX_TEST_PAIRS = [
-    ('William', 'Bill'),
-    ('Robert', 'Bob'),
-    ('Elizabeth', 'Liz'),
-    ('Michael', 'Mike'),
-    ('Richard', 'Dick'),
-    ('James', 'Jim'),
-    ('Margaret', 'Peggy'),
-    ('Charles', 'Chuck'),
-    ('Theodore', 'Ted'),
-]
-
-FAKE_NAMES = [
-    ('Test', 'User'),
-    ('Asdf', 'Qwerty'),
-]
+def random_record_date(days_back: int = 730) -> date:
+    delta = random.randint(0, days_back)
+    return (datetime.now(timezone.utc) - timedelta(days=delta)).date()
 
 
-def generate_customers_crm_c(
+def make_address(addr_id: str, customer_id: str) -> NorwegianAddress:
+    return NorwegianAddress(
+        id=addr_id,
+        customer_id=customer_id,
+        gate=f"{random.choice(NO_STREETS)} {random.randint(1, 120)}",
+        postnummer=f"{random.randint(1, 9999):04d}",
+        by=random.choice(NO_CITIES),
+        land='NO',
+    )
+
+
+# ---------------------------------------------------------------------------
+# Shared-person pool (backbone of all cross-source matching scenarios)
+# ---------------------------------------------------------------------------
+
+class SharedPerson:
+    """One real individual who may appear in multiple source systems."""
+    __slots__ = ('idx','ssn','birth_date','first_name','last_name',
+                 'citizenship','phone','email')
+
+    def __init__(self, idx: int):
+        self.idx         = idx
+        self.ssn, bd     = generate_personnummer()
+        self.birth_date  = bd
+        self.first_name  = fake.first_name()
+        self.last_name   = fake.last_name()
+        self.citizenship = random.choice(CITIZENSHIPS)
+        self.phone       = generate_norwegian_phone()
+        self.email       = generate_email(self.first_name, self.last_name)
+
+
+# ---------------------------------------------------------------------------
+# FREG (~400 records)
+# ---------------------------------------------------------------------------
+
+def generate_freg_customers(
     count: int,
-    crm_a_customers: list[Customer],
-    crm_b_customers: list[Customer],
-    overlap_count_a: int,
-    overlap_count_b: int
-) -> list[Customer]:
-    """Generate CRM C (Call Center) customers with overlap to A and B."""
+    shared_persons: list,          # SharedPerson list
+    nickname_pairs_last: list,     # shared last names for nickname pairs
+) -> list:
     customers = []
 
-    overlap_a_pool = crm_a_customers[len(CORTEX_TEST_PAIRS):]
-    overlap_b_pool = crm_b_customers[len(CORTEX_TEST_PAIRS) + len(FAKE_NAMES):]
-    overlap_a = random.sample(overlap_a_pool, min(overlap_count_a, len(overlap_a_pool)))
-    overlap_b = random.sample(overlap_b_pool, min(overlap_count_b, len(overlap_b_pool)))
-
-    idx = 1
-    for orig in overlap_a:
-        scenario = idx % 3
-        if scenario == 0:
-            customers.append(Customer(
-                id=f"C{idx:06d}",
-                first_name=orig.first_name,
-                last_name=orig.last_name,
-                email=orig.email,
-                phone=generate_phone('dashes')
-            ))
-        elif scenario == 1:
-            normalized = ''.join(filter(str.isdigit, orig.phone))
-            customers.append(Customer(
-                id=f"C{idx:06d}",
-                first_name=orig.first_name.upper() if orig.first_name else fake.first_name(),
-                last_name=orig.last_name.upper() if orig.last_name else fake.last_name(),
-                email=fake.email(),
-                phone=f"+1{normalized[-10:]}" if len(normalized) >= 10 else generate_phone('full')
-            ))
-        else:
-            customers.append(Customer(
-                id=f"C{idx:06d}",
-                first_name=typo_name(orig.first_name) if orig.first_name else fake.first_name(),
-                last_name=orig.last_name,
-                email=orig.email,
-                phone=generate_phone('full')
-            ))
-        idx += 1
-
-    for orig in overlap_b:
-        customers.append(Customer(
-            id=f"C{idx:06d}",
-            first_name=orig.first_name if orig.first_name else fake.first_name(),
-            last_name=orig.last_name if orig.last_name else fake.last_name(),
-            email=orig.email,
-            phone=generate_phone('parens')
+    # Shared persons → will match BS/NICE via SSN
+    for p in shared_persons:
+        customers.append(NorwegianCustomer(
+            id=f"FREG{p.idx+1:06d}",
+            ssn=p.ssn,
+            first_name=p.first_name,
+            last_name=p.last_name,
+            birth_date=p.birth_date,
+            citizenship=p.citizenship,
+            phone=None,
+            email=None,
+            record_date=random_record_date(1825),
+            organization=None,
+            source=SOURCE_FREG,
         ))
-        idx += 1
 
-    unique_count = count - len(overlap_a) - len(overlap_b)
-    for _ in range(unique_count):
-        dq_scenario = idx % 8
-        first_name = fake.first_name()
-        last_name = fake.last_name()
-        if dq_scenario == 0:
-            email = 'no-reply@callcenter.internal'
-            phone = generate_phone('full')
-        elif dq_scenario == 1:
-            email = fake.email()
-            phone = 'N/A'
-        elif dq_scenario == 2:
-            email = None
-            phone = generate_phone('full')
-        else:
-            email = fake.email()
-            phone = generate_phone(random.choice(['full', 'dashes', 'parens']))
-        customers.append(Customer(
-            id=f"C{idx:06d}",
-            first_name=first_name,
-            last_name=last_name,
-            email=email,
-            phone=phone
-        ))
-        idx += 1
-
-    return customers
-
-
-def generate_customers_crm_a(count: int) -> list[Customer]:
-    """Generate CRM A customers with seeded Cortex AI test cases."""
-    customers = []
-
-    for idx, (canonical, _nickname) in enumerate(CORTEX_TEST_PAIRS):
-        shared_last = fake.last_name()
-        customers.append(Customer(
-            id=f"A{idx+1:06d}",
+    # Nickname pairs: canonical name in FREG
+    for idx, ((canonical, _nickname), shared_last) in enumerate(
+            zip(NORWEGIAN_NICKNAME_PAIRS, nickname_pairs_last)):
+        pnr, bd = generate_personnummer()
+        customers.append(NorwegianCustomer(
+            id=f"FREG_NP{idx+1:03d}",
+            ssn=pnr,
             first_name=canonical,
             last_name=shared_last,
-            email=f"{canonical.lower()}.{shared_last.lower()}@crm-a-{idx}.com",
-            phone=generate_phone('full')
+            birth_date=bd,
+            citizenship='NO',
+            phone=None,
+            email=None,
+            record_date=random_record_date(1825),
+            organization=None,
+            source=SOURCE_FREG,
         ))
 
-    start = len(CORTEX_TEST_PAIRS) + 1
-    for i in range(start, count + 1):
-        customers.append(Customer(
-            id=f"A{i:06d}",
+    # Unique FREG-only persons to reach target count
+    offset = len(shared_persons)
+    for i in range(count - len(customers)):
+        pnr, bd = generate_personnummer()
+        customers.append(NorwegianCustomer(
+            id=f"FREG{offset+i+1:06d}",
+            ssn=pnr,
             first_name=fake.first_name(),
             last_name=fake.last_name(),
-            email=fake.email(),
-            phone=generate_phone(random.choice(['full', 'dashes', 'parens']))
+            birth_date=bd,
+            citizenship=random.choice(CITIZENSHIPS),
+            phone=None,
+            email=None,
+            record_date=random_record_date(1825),
+            organization=None,
+            source=SOURCE_FREG,
         ))
-    return customers
+
+    return customers[:count]
 
 
-def generate_customers_crm_b(
+# ---------------------------------------------------------------------------
+# BS (~500 records)
+# ---------------------------------------------------------------------------
+
+def generate_bs_customers(
     count: int,
-    crm_a_customers: list[Customer],
-    overlap_count: int
-) -> list[Customer]:
-    """
-    Generate CRM B customers with controlled overlap for testing.
-    
-    Test scenarios:
-    - MATCH-D01: Same email
-    - MATCH-D02: Same phone (different format)
-    - MATCH-P01: Similar name (typos)
-    - Survivorship: Various value combinations
-    """
+    shared_persons: list,          # same SharedPerson pool as FREG
+    cross_org_indices: set,        # indices of shared_persons that appear in BOTH orgs
+    fuzzy_persons: list,           # SharedPerson — BS has SSN; NICE will have same phone, no SSN
+    nickname_pairs: list,          # list of (nickname_str, shared_last_str, phone_str)
+) -> list:
     customers = []
-    
-    for idx, (_canonical, nickname) in enumerate(CORTEX_TEST_PAIRS):
-        orig = crm_a_customers[idx]
-        customers.append(Customer(
-            id=f"B{idx+1:06d}",
-            first_name=nickname,
-            last_name=orig.last_name,
-            email=f"{nickname.lower()}.{orig.last_name.lower()}@crm-b-{idx}.com",
-            phone=generate_phone('full')
-        ))
 
-    for fidx, (fake_first, fake_last) in enumerate(FAKE_NAMES):
-        customers.append(Customer(
-            id=f"B{len(CORTEX_TEST_PAIRS) + fidx + 1:06d}",
-            first_name=fake_first,
-            last_name=fake_last,
-            email=fake.email(),
-            phone=generate_phone('full')
-        ))
-
-    cortex_offset = len(CORTEX_TEST_PAIRS) + len(FAKE_NAMES)
-    remaining_overlap = overlap_count - len(CORTEX_TEST_PAIRS)
-    non_cortex_a = crm_a_customers[len(CORTEX_TEST_PAIRS):]
-    overlap_customers = random.sample(non_cortex_a, min(remaining_overlap, len(non_cortex_a)))
-
-    scenario_idx = 0
-    for i, orig in enumerate(overlap_customers):
-        scenario = scenario_idx % 8
-        scenario_idx += 1
-        
-        if scenario == 0:
-            customers.append(Customer(
-                id=f"B{cortex_offset + i + 1:06d}",
-                first_name=fake.first_name(),
-                last_name=fake.last_name(),
-                email=orig.email,
-                phone=generate_phone('full')
-            ))
-        
-        elif scenario == 1:
-            normalized = ''.join(filter(str.isdigit, orig.phone))
-            customers.append(Customer(
-                id=f"B{cortex_offset + i + 1:06d}",
-                first_name=fake.first_name(),
-                last_name=fake.last_name(),
-                email=fake.email(),
-                phone=f"+1{normalized[-10:]}" if len(normalized) >= 10 else generate_phone('full')
-            ))
-        
-        elif scenario == 2:
-            customers.append(Customer(
-                id=f"B{cortex_offset + i + 1:06d}",
-                first_name=typo_name(orig.first_name) if orig.first_name else fake.first_name(),
-                last_name=typo_name(orig.last_name) if orig.last_name else fake.last_name(),
-                email=fake.email(),
-                phone=generate_phone('full')
-            ))
-        
-        elif scenario == 3:
-            customers.append(Customer(
-                id=f"B{cortex_offset + i + 1:06d}",
-                first_name=fake.first_name(),
-                last_name=fake.last_name(),
-                email=orig.email,
-                phone=generate_phone('full')
-            ))
-        
-        elif scenario == 4:
-            customers.append(Customer(
-                id=f"B{cortex_offset + i + 1:06d}",
-                first_name='',
-                last_name=orig.last_name,
-                email=orig.email,
-                phone=generate_phone('full')
-            ))
-        
-        elif scenario == 5:
-            domain = orig.email.split('@')[1] if orig.email and '@' in orig.email else 'example.com'
-            new_email = f"{orig.first_name.lower()}.{orig.last_name.lower()}@{domain}" if orig.first_name and orig.last_name else fake.email()
-            customers.append(Customer(
-                id=f"B{cortex_offset + i + 1:06d}",
-                first_name=orig.first_name,
-                last_name=orig.last_name,
-                email=new_email,
-                phone=generate_phone('short')
-            ))
-        
-        elif scenario == 6:
-            customers.append(Customer(
-                id=f"B{cortex_offset + i + 1:06d}",
-                first_name=orig.first_name,
-                last_name=orig.last_name,
-                email=f"{fake.user_name()}@{random.choice(DISPOSABLE_DOMAINS)}",
-                phone=generate_phone('full')
-            ))
-        
-        elif scenario == 7:
-            customers.append(Customer(
-                id=f"B{cortex_offset + i + 1:06d}",
-                first_name=orig.first_name,
-                last_name=orig.last_name,
-                email=orig.email,
-                phone=random.choice(PLACEHOLDER_PHONES)
-            ))
-    
-    unique_count = count - len(overlap_customers) - cortex_offset
-    for i in range(unique_count):
-        idx = cortex_offset + len(overlap_customers) + i + 1
-        
-        first_name = fake.first_name()
-        last_name = fake.last_name()
-        
-        dq_scenario = i % 10
-        if dq_scenario == 0:
-            email = 'invalid-email-format'
-            phone = generate_phone('full')
-        elif dq_scenario == 1:
-            email = f"{fake.user_name()}@{random.choice(DISPOSABLE_DOMAINS)}"
-            phone = generate_phone('full')
-        elif dq_scenario == 2:
-            first_name = ''
-            email = fake.email()
-            phone = generate_phone('full')
-        elif dq_scenario == 3:
-            email = fake.email()
-            phone = 'abc123'
-        elif dq_scenario == 4:
-            email = fake.email()
-            phone = random.choice(PLACEHOLDER_PHONES)
-        elif dq_scenario == 5:
-            email = None
-            phone = None
-        elif dq_scenario == 6:
-            email = f"{first_name.lower()}.{last_name.lower()}@company.com"
-            phone = generate_phone('full')
-        else:
-            email = fake.email()
-            phone = generate_phone('full')
-        
-        customers.append(Customer(
-            id=f"B{idx:06d}",
-            first_name=first_name if first_name else None,
-            last_name=last_name,
-            email=email,
-            phone=phone
-        ))
-    
-    return customers
-
-
-def generate_addresses_crm_c(
-    customers: list[Customer],
-    crm_a_addresses: list[Address],
-    crm_a_customers: list[Customer]
-) -> list[Address]:
-    """Generate addresses for CRM C (Call Center) customers."""
-    addresses = []
-    addr_id = 1
-
-    a_customer_addrs = {}
-    for addr in crm_a_addresses:
-        if addr.customer_id not in a_customer_addrs:
-            a_customer_addrs[addr.customer_id] = []
-        a_customer_addrs[addr.customer_id].append(addr)
-
-    for cust in customers:
-        if random.random() < 0.3:
-            match_idx = int(cust.id[1:]) - 1
-            if match_idx < len(crm_a_customers):
-                orig_cust_id = crm_a_customers[match_idx].id
-                if orig_cust_id in a_customer_addrs:
-                    orig_addr = random.choice(a_customer_addrs[orig_cust_id])
-                    addresses.append(Address(
-                        id=f"AC{addr_id:06d}",
-                        customer_id=cust.id,
-                        street=orig_addr.street,
-                        city=orig_addr.city,
-                        postal_code=orig_addr.postal_code,
-                        country=orig_addr.country
-                    ))
-                    addr_id += 1
-                    continue
-
-        addresses.append(Address(
-            id=f"AC{addr_id:06d}",
-            customer_id=cust.id,
-            street=fake.street_address(),
-            city=fake.city(),
-            postal_code=fake.postcode(),
-            country=random.choice(['US', 'CA', 'UK', 'DE', 'FR'])
-        ))
-        addr_id += 1
-
-    return addresses
-
-
-def generate_addresses_crm_a(customers: list[Customer]) -> list[Address]:
-    """Generate addresses for CRM A customers."""
-    addresses = []
-    addr_id = 1
-    
-    for cust in customers:
-        num_addresses = random.choices([1, 2, 3], weights=[0.6, 0.3, 0.1])[0]
-        
-        for _ in range(num_addresses):
-            addresses.append(Address(
-                id=f"AA{addr_id:06d}",
-                customer_id=cust.id,
-                street=fake.street_address(),
-                city=fake.city(),
-                postal_code=fake.postcode(),
-                country=random.choice(['US', 'CA', 'UK', 'DE', 'FR'])
-            ))
-            addr_id += 1
-    
-    return addresses
-
-
-def generate_addresses_crm_b(
-    customers: list[Customer],
-    crm_a_addresses: list[Address],
-    crm_a_customers: list[Customer]
-) -> list[Address]:
-    """Generate addresses for CRM B with some matching addresses."""
-    addresses = []
-    addr_id = 1
-    
-    a_customer_addrs = {}
-    for addr in crm_a_addresses:
-        if addr.customer_id not in a_customer_addrs:
-            a_customer_addrs[addr.customer_id] = []
-        a_customer_addrs[addr.customer_id].append(addr)
-    
-    for cust in customers:
-        num_addresses = random.choices([1, 2], weights=[0.7, 0.3])[0]
-        
-        match_idx = int(cust.id[1:]) - 1
-        if match_idx < len(crm_a_customers):
-            orig_cust_id = crm_a_customers[match_idx].id
-            if orig_cust_id in a_customer_addrs and random.random() < 0.5:
-                orig_addr = random.choice(a_customer_addrs[orig_cust_id])
-                
-                if random.random() < 0.3:
-                    street = orig_addr.street.replace('Street', 'St.').replace('Avenue', 'Ave.')
-                else:
-                    street = orig_addr.street
-                
-                addresses.append(Address(
-                    id=f"AB{addr_id:06d}",
-                    customer_id=cust.id,
-                    street=street,
-                    city=orig_addr.city,
-                    postal_code=orig_addr.postal_code,
-                    country=orig_addr.country
+    # Shared persons — exact SSN+name match with FREG
+    for p in shared_persons:
+        if p.idx in cross_org_indices:
+            # Cross-org: same person in BANK and INS
+            for org in [ORG_BANK, ORG_INS]:
+                customers.append(NorwegianCustomer(
+                    id=f"BS{p.idx+1:06d}_{org}",
+                    ssn=p.ssn,
+                    first_name=p.first_name,
+                    last_name=p.last_name,
+                    birth_date=None,
+                    citizenship=None,
+                    phone=p.phone,
+                    email=p.email,
+                    record_date=random_record_date(730),
+                    organization=org,
+                    source=SOURCE_BS,
                 ))
-                addr_id += 1
-                num_addresses -= 1
-        
-        for _ in range(num_addresses):
-            addr_scenario = random.randint(0, 5)
-            
-            if addr_scenario == 0:
-                street = fake.street_address()[:3]
-                city = fake.city()
-                postal_code = fake.postcode()
-                country = 'US'
-            elif addr_scenario == 1:
-                street = fake.street_address()
-                city = None
-                postal_code = fake.postcode()
-                country = 'US'
-            else:
-                street = fake.street_address()
-                city = fake.city()
-                postal_code = fake.postcode()
-                country = random.choice(['US', 'CA', 'UK', 'DE', 'FR'])
-            
-            addresses.append(Address(
-                id=f"AB{addr_id:06d}",
-                customer_id=cust.id,
-                street=street,
-                city=city,
-                postal_code=postal_code,
-                country=country
+        else:
+            customers.append(NorwegianCustomer(
+                id=f"BS{p.idx+1:06d}",
+                ssn=p.ssn,
+                first_name=p.first_name,
+                last_name=p.last_name,
+                birth_date=None,
+                citizenship=None,
+                phone=p.phone,
+                email=p.email,
+                record_date=random_record_date(730),
+                organization=random.choice([ORG_BANK, ORG_INS]),
+                source=SOURCE_BS,
             ))
-            addr_id += 1
-    
-    return addresses
+
+    # Fuzzy-only persons: BS has SSN; NICE will have same phone but no SSN
+    for p in fuzzy_persons:
+        customers.append(NorwegianCustomer(
+            id=f"BS_FZ{p.idx+1:06d}",
+            ssn=p.ssn,
+            first_name=p.first_name,
+            last_name=p.last_name,
+            birth_date=None,
+            citizenship=None,
+            phone=p.phone,
+            email=p.email,
+            record_date=random_record_date(365),
+            organization=random.choice([ORG_BANK, ORG_INS]),
+            source=SOURCE_BS,
+        ))
+
+    # Nickname pairs: FREG has canonical; BS has same last name, same phone, nickname first
+    for idx, (nickname, shared_last, shared_phone) in enumerate(nickname_pairs):
+        pnr, _ = generate_personnummer()   # different SSN — forces AI resolution
+        customers.append(NorwegianCustomer(
+            id=f"BS_NP{idx+1:03d}",
+            ssn=pnr,
+            first_name=nickname,
+            last_name=shared_last,
+            birth_date=None,
+            citizenship=None,
+            phone=shared_phone,
+            email=generate_email(nickname, shared_last),
+            record_date=random_record_date(365),
+            organization=random.choice([ORG_BANK, ORG_INS]),
+            source=SOURCE_BS,
+        ))
+
+    # Fill to target with BS-unique persons
+    for i in range(count - len(customers)):
+        pnr, _ = generate_personnummer()
+        customers.append(NorwegianCustomer(
+            id=f"BS_U{i+1:06d}",
+            ssn=pnr,
+            first_name=fake.first_name(),
+            last_name=fake.last_name(),
+            birth_date=None,
+            citizenship=None,
+            phone=generate_norwegian_phone(),
+            email=fake.email(),
+            record_date=random_record_date(730),
+            organization=random.choice([ORG_BANK, ORG_INS]),
+            source=SOURCE_BS,
+        ))
+
+    return customers[:count]
 
 
-def write_customer_csv_a(customers: list[Customer], filepath: str):
-    """Write CRM A customer CSV."""
+# ---------------------------------------------------------------------------
+# NICE (~600 records)
+# ---------------------------------------------------------------------------
+
+def generate_nice_customers(
+    count: int,
+    shared_persons: list,          # first nice_ssn_count entries match FREG+BS
+    nice_ssn_count: int,
+    fuzzy_persons: list,           # same SharedPerson pool as BS fuzzy — NICE has no SSN
+    nickname_pairs: list,          # list of (nickname_str, shared_last_str, phone_str)
+) -> list:
+    customers = []
+
+    # Shared persons WITH SSN (exact match across all 3 sources)
+    for p in shared_persons[:nice_ssn_count]:
+        customers.append(NorwegianCustomer(
+            id=f"NICE{p.idx+1:06d}",
+            ssn=p.ssn,
+            first_name=p.first_name,
+            last_name=p.last_name,
+            birth_date=None,
+            citizenship=None,
+            phone=p.phone,
+            email=p.email,
+            record_date=random_record_date(365),
+            organization=random.choice([ORG_BANK, ORG_INS]),
+            source=SOURCE_NICE,
+        ))
+
+    # Fuzzy-only: same phone as BS counterpart but NO SSN
+    for p in fuzzy_persons:
+        # ~50 % chance of first-name typo to exercise Jaro-Winkler
+        variant_first = typo_name(p.first_name) if random.random() < 0.5 else p.first_name
+        customers.append(NorwegianCustomer(
+            id=f"NICE_FZ{p.idx+1:06d}",
+            ssn=None,               # drives fuzzy-only scenario
+            first_name=variant_first,
+            last_name=p.last_name,
+            birth_date=None,
+            citizenship=None,
+            phone=p.phone,          # same phone as BS record → phone match
+            email=p.email,
+            record_date=random_record_date(365),
+            organization=random.choice([ORG_BANK, ORG_INS]),
+            source=SOURCE_NICE,
+        ))
+
+    # Data steward queue: no SSN, unique foreign names, no match possible
+    for idx, (first, last) in enumerate(STEWARD_QUEUE_NAMES):
+        customers.append(NorwegianCustomer(
+            id=f"NICE_SQ{idx+1:03d}",
+            ssn=None,
+            first_name=first,
+            last_name=last,
+            birth_date=None,
+            citizenship=None,
+            phone=generate_norwegian_phone(),
+            email=fake.email(),
+            record_date=random_record_date(180),
+            organization=random.choice([ORG_BANK, ORG_INS]),
+            source=SOURCE_NICE,
+        ))
+
+    # Nickname pairs in NICE: same phone as BS nickname record, no SSN
+    for idx, (nickname, shared_last, shared_phone) in enumerate(nickname_pairs):
+        customers.append(NorwegianCustomer(
+            id=f"NICE_NP{idx+1:03d}",
+            ssn=None,               # no SSN — forces nickname-based AI resolution
+            first_name=nickname,
+            last_name=shared_last,
+            birth_date=None,
+            citizenship=None,
+            phone=shared_phone,     # same phone → phone match + AI confirmation
+            email=generate_email(nickname, shared_last),
+            record_date=random_record_date(365),
+            organization=random.choice([ORG_BANK, ORG_INS]),
+            source=SOURCE_NICE,
+        ))
+
+    # Fill remaining with NICE-unique records; ~30 % have no SSN
+    for i in range(count - len(customers)):
+        has_ssn = random.random() > 0.30
+        ssn = None
+        if has_ssn:
+            ssn, _ = generate_personnummer()
+        customers.append(NorwegianCustomer(
+            id=f"NICE_U{i+1:06d}",
+            ssn=ssn,
+            first_name=fake.first_name(),
+            last_name=fake.last_name(),
+            birth_date=None,
+            citizenship=None,
+            phone=generate_norwegian_phone(),
+            email=fake.email(),
+            record_date=random_record_date(365),
+            organization=random.choice([ORG_BANK, ORG_INS]),
+            source=SOURCE_NICE,
+        ))
+
+    return customers[:count]
+
+
+# ---------------------------------------------------------------------------
+# Address generation (1 address per customer)
+# ---------------------------------------------------------------------------
+
+def generate_addresses(customers: list, prefix: str) -> list:
+    return [make_address(f"{prefix}{i+1:06d}", c.id) for i, c in enumerate(customers)]
+
+
+# ---------------------------------------------------------------------------
+# CSV writers
+# ---------------------------------------------------------------------------
+
+def write_freg_customer_csv(customers: list, filepath: str):
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(['src_customer_id', 'first_name', 'last_name', 'email', 'phone'])
+        writer.writerow(['ssn', 'first_name', 'last_name', 'birth_date',
+                         'citizenship', 'record_date'])
         for c in customers:
-            writer.writerow([c.id, c.first_name or '', c.last_name or '', c.email or '', c.phone or ''])
+            writer.writerow([
+                c.ssn or '',
+                c.first_name or '',
+                c.last_name or '',
+                c.birth_date.isoformat() if c.birth_date else '',
+                c.citizenship or '',
+                c.record_date.isoformat(),
+            ])
 
 
-def write_customer_csv_b(customers: list[Customer], filepath: str):
-    """Write CRM B customer CSV (different column structure)."""
+def write_bs_customer_csv(customers: list, filepath: str):
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(['customer_key', 'name', 'email_address', 'mobile'])
+        writer.writerow(['ssn', 'first_name', 'last_name', 'phone',
+                         'email', 'record_date', 'organization'])
         for c in customers:
-            full_name = f"{c.first_name or ''} {c.last_name or ''}".strip()
-            writer.writerow([c.id, full_name, c.email or '', c.phone or ''])
+            writer.writerow([
+                c.ssn or '',
+                c.first_name or '',
+                c.last_name or '',
+                c.phone or '',
+                c.email or '',
+                c.record_date.isoformat(),
+                c.organization or '',
+            ])
 
 
-def write_address_csv_a(addresses: list[Address], filepath: str):
-    """Write CRM A address CSV."""
+def write_nice_customer_csv(customers: list, filepath: str):
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(['src_address_id', 'src_customer_id', 'street', 'city', 'postal_code', 'country'])
-        for a in addresses:
-            writer.writerow([a.id, a.customer_id, a.street or '', a.city or '', a.postal_code or '', a.country or ''])
-
-
-def write_customer_csv_c(customers: list[Customer], filepath: str):
-    """Write CRM C (Call Center) customer CSV."""
-    with open(filepath, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(['ticket_customer_id', 'caller_name', 'callback_email', 'callback_phone'])
+        writer.writerow(['ssn', 'first_name', 'last_name', 'phone',
+                         'email', 'record_date', 'organization'])
         for c in customers:
-            full_name = f"{c.first_name or ''} {c.last_name or ''}".strip()
-            writer.writerow([c.id, full_name, c.email or '', c.phone or ''])
+            writer.writerow([
+                c.ssn or '',      # empty string when SSN is NULL
+                c.first_name or '',
+                c.last_name or '',
+                c.phone or '',
+                c.email or '',
+                c.record_date.isoformat(),
+                c.organization or '',
+            ])
 
 
-def write_address_csv_c(addresses: list[Address], filepath: str):
-    """Write CRM C (Call Center) address CSV."""
+def write_address_csv(addresses: list, filepath: str):
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(['addr_ref', 'ticket_customer_id', 'location', 'town', 'postcode', 'country'])
+        writer.writerow(['src_address_id', 'src_customer_id',
+                         'gate', 'postnummer', 'by', 'land'])
         for a in addresses:
-            writer.writerow([a.id, a.customer_id, a.street or '', a.city or '', a.postal_code or '', a.country or ''])
+            writer.writerow([a.id, a.customer_id, a.gate, a.postnummer, a.by, a.land])
 
 
-def write_address_csv_b(addresses: list[Address], filepath: str):
-    """Write CRM B address CSV (different column names)."""
-    with open(filepath, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(['addr_id', 'customer_key', 'address_line', 'city', 'zip', 'country_code'])
-        for a in addresses:
-            writer.writerow([a.id, a.customer_id, a.street or '', a.city or '', a.postal_code or '', a.country or ''])
+# ---------------------------------------------------------------------------
+# Daily update generators (SCD Type 2)
+# ---------------------------------------------------------------------------
 
-
-def print_test_coverage_report(
-    crm_a_customers: list[Customer],
-    crm_b_customers: list[Customer],
-    crm_c_customers: list[Customer],
-    crm_a_addresses: list[Address],
-    crm_b_addresses: list[Address],
-    crm_c_addresses: list[Address]
-):
-    """Print report of test data coverage."""
-    print("\n" + "="*70)
-    print("TEST DATA GENERATION REPORT")
-    print("="*70)
-    
-    print(f"\n{'Category':<30} {'Count':>10}")
-    print("-"*40)
-    print(f"{'CRM A Customers':<30} {len(crm_a_customers):>10}")
-    print(f"{'CRM B Customers':<30} {len(crm_b_customers):>10}")
-    print(f"{'CRM C Customers':<30} {len(crm_c_customers):>10}")
-    print(f"{'Total Raw Records':<30} {len(crm_a_customers) + len(crm_b_customers) + len(crm_c_customers):>10}")
-    print(f"{'CRM A Addresses':<30} {len(crm_a_addresses):>10}")
-    print(f"{'CRM B Addresses':<30} {len(crm_b_addresses):>10}")
-    print(f"{'CRM C Addresses':<30} {len(crm_c_addresses):>10}")
-    
-    print(f"\n{'Cortex Test Pairs (nickname)':<30} {len(CORTEX_TEST_PAIRS):>10}")
-    print(f"{'Cortex Test Cases (fake name)':<30} {len(FAKE_NAMES):>10}")
-
-    print("\n" + "-"*70)
-    print("CORTEX AI TEST COVERAGE")
-    print("-"*70)
-    for canonical, nickname in CORTEX_TEST_PAIRS:
-        print(f"  CRM_A: {canonical:<12} ↔ CRM_B: {nickname:<10}  (same last name, different email/phone)")
-    for fake_first, fake_last in FAKE_NAMES:
-        print(f"  Fake Name:  {fake_first} {fake_last}")
-
-    print("\n" + "-"*70)
-    print("MATCHING RULE COVERAGE")
-    print("-"*70)
-    
-    crm_a_emails = {a.email for a in crm_a_customers if a.email}
-    email_matches = sum(1 for b in crm_b_customers if b.email and b.email in crm_a_emails)
-    print(f"MATCH-D01 (Email Exact):       ~{email_matches} pairs")
-    
-    def normalize_phone(p):
-        return ''.join(filter(str.isdigit, p or ''))[-10:] if p else ''
-    
-    crm_a_phones = {normalize_phone(a.phone) for a in crm_a_customers if len(normalize_phone(a.phone)) >= 10}
-    phone_matches = sum(1 for b in crm_b_customers 
-                       if len(normalize_phone(b.phone)) >= 10 and normalize_phone(b.phone) in crm_a_phones)
-    print(f"MATCH-D02 (Phone Normalized):  ~{phone_matches} pairs")
-    print(f"MATCH-P01-P05 (Fuzzy):         ~{len(crm_b_customers) // 3} pairs (estimated)")
-    
-    print("\n" + "-"*70)
-    print("SURVIVORSHIP RULE COVERAGE")
-    print("-"*70)
-    print("S1: Most Recent Name           - CRM B newer timestamps for overlaps")
-    print("S2: Non-Empty Fallback         - Empty first_name in CRM B scenarios")
-    print("S3: Source Priority Email      - Both sources have valid emails")
-    print("S4: Validity Override          - CRM A with invalid email format")
-    print("S5: Most Complete Phone        - Short vs E.164 format phones")
-    print("S6: Null vs Non-null           - NULL values in various fields")
-    
-    print("\n" + "-"*70)
-    print("DQ RULE COVERAGE")
-    print("-"*70)
-    
-    invalid_emails = sum(1 for c in crm_b_customers if c.email and '@' not in c.email)
-    disposable_emails = sum(1 for c in crm_b_customers 
-                          if c.email and any(d in c.email for d in DISPOSABLE_DOMAINS))
-    empty_names = sum(1 for c in crm_b_customers if not c.first_name or c.first_name == '')
-    placeholder_phones = sum(1 for c in crm_b_customers if c.phone in PLACEHOLDER_PHONES)
-    no_contact = sum(1 for c in crm_b_customers if not c.email and not c.phone)
-    
-    print(f"DQ-001 (Invalid Email):        {invalid_emails} records")
-    print(f"DQ-002 (Disposable Domain):    {disposable_emails} records")
-    print(f"DQ-003 (Empty First Name):     {empty_names} records")
-    print(f"DQ-008 (Placeholder Phone):    {placeholder_phones} records")
-    print(f"DQ-C01 (No Contact Method):    {no_contact} records")
-    
-    print("\n" + "="*70)
-    print(f"Output files written to: {OUTPUT_DIR}")
-    print("="*70 + "\n")
-
-
-def generate_daily_updates_customers(
-    base_customers: list[Customer],
-    source: str,
-    day_number: int,
-    change_rate: float = 0.1
-) -> list[Customer]:
-    """
-    Generate daily update file with changes to existing customers.
-    
-    SCD Type 2 test scenarios:
-    - Email changes (triggers new version)
-    - Phone changes (triggers new version)
-    - Name corrections (triggers new version)
-    - Address updates via linked addresses
-    """
+def generate_daily_updates_freg(base: list, _day: int, change_rate: float = 0.005) -> list:
+    """FREG is very stable — only record_date bumps."""
     updates = []
-    num_changes = int(len(base_customers) * change_rate)
-    customers_to_change = random.sample(base_customers, num_changes)
-    
-    for i, cust in enumerate(customers_to_change):
-        scenario = i % 5
-        
-        if scenario == 0:
-            new_email = fake.email()
-            updates.append(Customer(
-                id=cust.id,
-                first_name=cust.first_name,
-                last_name=cust.last_name,
-                email=new_email,
-                phone=cust.phone
-            ))
-        
-        elif scenario == 1:
-            new_phone = generate_phone('full')
-            updates.append(Customer(
-                id=cust.id,
-                first_name=cust.first_name,
-                last_name=cust.last_name,
-                email=cust.email,
-                phone=new_phone
-            ))
-        
-        elif scenario == 2:
-            updates.append(Customer(
-                id=cust.id,
-                first_name=cust.first_name.upper() if cust.first_name else fake.first_name(),
-                last_name=cust.last_name.upper() if cust.last_name else fake.last_name(),
-                email=cust.email,
-                phone=cust.phone
-            ))
-        
-        elif scenario == 3:
-            new_email = f"{cust.first_name.lower()}.{cust.last_name.lower()}@newcompany.com" if cust.first_name and cust.last_name else fake.email()
-            new_phone = generate_phone('full')
-            updates.append(Customer(
-                id=cust.id,
-                first_name=cust.first_name,
-                last_name=cust.last_name,
-                email=new_email,
-                phone=new_phone
-            ))
-        
-        elif scenario == 4:
-            updates.append(Customer(
-                id=cust.id,
-                first_name=cust.first_name,
-                last_name=fake.last_name() if random.random() < 0.5 else cust.last_name,
-                email=cust.email,
-                phone=cust.phone
-            ))
-    
+    for cust in random.sample(base, max(1, int(len(base) * change_rate))):
+        updates.append(replace(cust, record_date=date.today()))
     return updates
 
 
-def generate_daily_updates_addresses(
-    base_addresses: list[Address],
-    source: str,
-    day_number: int,
-    change_rate: float = 0.15
-) -> list[Address]:
-    """
-    Generate daily update file with address changes.
-    
-    SCD Type 2 test scenarios:
-    - Customer moved to new address
-    - Address corrections (typo fixes)
-    - Country changes
-    """
+def generate_daily_updates_bs_or_nice(base: list, _day: int, change_rate: float = 0.01) -> list:
+    """Email/phone/name corrections for BS and NICE."""
     updates = []
-    num_changes = int(len(base_addresses) * change_rate)
-    addresses_to_change = random.sample(base_addresses, num_changes)
-    
-    for i, addr in enumerate(addresses_to_change):
+    for i, cust in enumerate(random.sample(base, max(1, int(len(base) * change_rate)))):
         scenario = i % 4
-        
         if scenario == 0:
-            updates.append(Address(
-                id=addr.id,
-                customer_id=addr.customer_id,
-                street=fake.street_address(),
-                city=fake.city(),
-                postal_code=fake.postcode(),
-                country=addr.country
-            ))
-        
+            updates.append(replace(cust, email=generate_email(cust.first_name, cust.last_name),
+                                   record_date=date.today()))
         elif scenario == 1:
-            corrected_street = addr.street.replace('St.', 'Street').replace('Ave.', 'Avenue') if addr.street else fake.street_address()
-            updates.append(Address(
-                id=addr.id,
-                customer_id=addr.customer_id,
-                street=corrected_street,
-                city=addr.city.upper() if addr.city else fake.city(),
-                postal_code=addr.postal_code,
-                country=addr.country
-            ))
-        
+            updates.append(replace(cust, phone=generate_norwegian_phone(),
+                                   record_date=date.today()))
         elif scenario == 2:
-            new_country = random.choice(['US', 'CA', 'UK', 'DE', 'FR', 'ES', 'IT'])
-            updates.append(Address(
-                id=addr.id,
-                customer_id=addr.customer_id,
-                street=addr.street,
-                city=addr.city,
-                postal_code=addr.postal_code,
-                country=new_country
-            ))
-        
-        elif scenario == 3:
-            updates.append(Address(
-                id=addr.id,
-                customer_id=addr.customer_id,
-                street=addr.street,
-                city=addr.city,
-                postal_code=fake.postcode(),
-                country=addr.country
-            ))
-    
+            updates.append(replace(cust, record_date=date.today()))
+        else:
+            updates.append(replace(cust, last_name=fake.last_name(),
+                                   record_date=date.today()))
     return updates
 
+
+def generate_daily_updates_addresses(base: list, _day: int, change_rate: float = 0.015) -> list:
+    updates = []
+    for addr in random.sample(base, max(1, int(len(base) * change_rate))):
+        updates.append(make_address(addr.id, addr.customer_id))
+    return updates
+
+
+# ---------------------------------------------------------------------------
+# Report
+# ---------------------------------------------------------------------------
+
+def print_report(freg_c, bs_c, nice_c, freg_a, bs_a, nice_a,
+                 fuzzy_count, steward_count, cross_org_count):
+    print("\n" + "=" * 70)
+    print("TEST DATA GENERATION REPORT — Sparebank 1 MDM POC")
+    print("=" * 70)
+    print(f"\n{'Category':<35} {'Count':>10}")
+    print("-" * 45)
+    print(f"{'FREG Customers':<35} {len(freg_c):>10}")
+    print(f"{'BS Customers':<35} {len(bs_c):>10}")
+    print(f"{'NICE Customers':<35} {len(nice_c):>10}")
+    print(f"{'Total Raw Customer Records':<35} {len(freg_c)+len(bs_c)+len(nice_c):>10}")
+    print(f"{'FREG Addresses':<35} {len(freg_a):>10}")
+    print(f"{'BS Addresses':<35} {len(bs_a):>10}")
+    print(f"{'NICE Addresses':<35} {len(nice_a):>10}")
+    print()
+    print("-" * 70)
+    print("MDM SCENARIO COVERAGE")
+    print("-" * 70)
+    no_ssn_nice = sum(1 for c in nice_c if not c.ssn)
+    print(f"  Exact SSN+name match (FREG/BS/NICE):   shared pool embedded")
+    print(f"  Fuzzy-only (NICE no SSN, phone match):  {fuzzy_count} NICE records")
+    print(f"  Data steward queue (no SSN, no match):  {steward_count} records")
+    print(f"  Cross-org BANK+INS (same SSN, both):    {cross_org_count} persons × 2 rows")
+    print(f"  Nickname pairs for Cortex AI:           {len(NORWEGIAN_NICKNAME_PAIRS)} pairs")
+    print(f"  NICE records without SSN (total):       {no_ssn_nice} "
+          f"({100*no_ssn_nice//len(nice_c)} %)")
+    print()
+    print("-" * 70)
+    print("NORWEGIAN NICKNAME PAIRS (Cortex AI test coverage)")
+    print("-" * 70)
+    for canonical, nickname in NORWEGIAN_NICKNAME_PAIRS:
+        print(f"  FREG: {canonical:<12} ↔ BS/NICE: {nickname}")
+    print()
+    print("=" * 70)
+    print(f"Output written to: {OUTPUT_DIR}")
+    print("=" * 70 + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
-    print("Generating test data for MDM Showcase...")
-    
+    print("Generating Sparebank 1 MDM test data (Norwegian locale)...")
+
     if os.path.exists(OUTPUT_DIR):
-        print(f"Cleaning output directory: {OUTPUT_DIR}")
+        print(f"Cleaning: {OUTPUT_DIR}")
         shutil.rmtree(OUTPUT_DIR)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
-    crm_a_customers = generate_customers_crm_a(600)
-    
-    crm_b_customers = generate_customers_crm_b(
-        count=400,
-        crm_a_customers=crm_a_customers,
-        overlap_count=180
+
+    # --- Volume parameters ---
+    FREG_TARGET   = 400
+    BS_TARGET     = 500
+    NICE_TARGET   = 600
+    FREG_SHARED   = 200   # persons that appear in all 3 sources
+    NICE_SSN      = 100   # of shared persons also appear in NICE with SSN
+    CROSS_ORG     = 30    # of shared persons appear in BOTH BANK and INS in BS
+    FUZZY_COUNT   = 50    # persons: BS (with SSN) ↔ NICE (no SSN, same phone)
+    STEWARD_COUNT = len(STEWARD_QUEUE_NAMES)  # 5
+
+    # Build shared-person pool
+    shared_persons = [SharedPerson(i) for i in range(FREG_SHARED)]
+    cross_org_idx  = set(random.sample(range(FREG_SHARED), CROSS_ORG))
+
+    # Fuzzy-only pool (distinct index range so SSNs don't collide)
+    fuzzy_persons  = [SharedPerson(FREG_SHARED + i) for i in range(FUZZY_COUNT)]
+
+    # Nickname pairs: shared last name + shared phone (FREG canonical / BS+NICE nickname)
+    nickname_pairs_last  = [fake.last_name() for _ in NORWEGIAN_NICKNAME_PAIRS]
+    nickname_pairs_phone = [generate_norwegian_phone() for _ in NORWEGIAN_NICKNAME_PAIRS]
+    # List of (nickname, shared_last, shared_phone) for BS and NICE writers
+    nickname_triples = [
+        (nickname, nickname_pairs_last[i], nickname_pairs_phone[i])
+        for i, (_canonical, nickname) in enumerate(NORWEGIAN_NICKNAME_PAIRS)
+    ]
+
+    # --- Generate source data ---
+    freg_customers = generate_freg_customers(
+        count=FREG_TARGET,
+        shared_persons=shared_persons,
+        nickname_pairs_last=nickname_pairs_last,
     )
-    
-    crm_a_addresses = generate_addresses_crm_a(crm_a_customers)
-    crm_b_addresses = generate_addresses_crm_b(crm_b_customers, crm_a_addresses, crm_a_customers)
-
-    crm_c_customers = generate_customers_crm_c(
-        count=500,
-        crm_a_customers=crm_a_customers,
-        crm_b_customers=crm_b_customers,
-        overlap_count_a=100,
-        overlap_count_b=50
+    bs_customers = generate_bs_customers(
+        count=BS_TARGET,
+        shared_persons=shared_persons,
+        cross_org_indices=cross_org_idx,
+        fuzzy_persons=fuzzy_persons,
+        nickname_pairs=nickname_triples,
     )
-    crm_c_addresses = generate_addresses_crm_c(crm_c_customers, crm_a_addresses, crm_a_customers)
+    nice_customers = generate_nice_customers(
+        count=NICE_TARGET,
+        shared_persons=shared_persons,
+        nice_ssn_count=NICE_SSN,
+        fuzzy_persons=fuzzy_persons,
+        nickname_pairs=nickname_triples,
+    )
 
-    initial_a_cust_dir = os.path.join(OUTPUT_DIR, 'initial', 'A', 'customer')
-    initial_a_addr_dir = os.path.join(OUTPUT_DIR, 'initial', 'A', 'address')
-    initial_b_cust_dir = os.path.join(OUTPUT_DIR, 'initial', 'B', 'customer')
-    initial_b_addr_dir = os.path.join(OUTPUT_DIR, 'initial', 'B', 'address')
-    initial_c_cust_dir = os.path.join(OUTPUT_DIR, 'initial', 'C', 'customer')
-    initial_c_addr_dir = os.path.join(OUTPUT_DIR, 'initial', 'C', 'address')
-    update_a_cust_dir = os.path.join(OUTPUT_DIR, 'update', 'A', 'customer')
-    update_a_addr_dir = os.path.join(OUTPUT_DIR, 'update', 'A', 'address')
-    update_b_cust_dir = os.path.join(OUTPUT_DIR, 'update', 'B', 'customer')
-    update_b_addr_dir = os.path.join(OUTPUT_DIR, 'update', 'B', 'address')
-    update_c_cust_dir = os.path.join(OUTPUT_DIR, 'update', 'C', 'customer')
-    update_c_addr_dir = os.path.join(OUTPUT_DIR, 'update', 'C', 'address')
+    freg_addresses = generate_addresses(freg_customers, 'AF')
+    bs_addresses   = generate_addresses(bs_customers,   'AB')
+    nice_addresses = generate_addresses(nice_customers,  'AN')
 
-    for d in [initial_a_cust_dir, initial_a_addr_dir, initial_b_cust_dir, initial_b_addr_dir,
-              initial_c_cust_dir, initial_c_addr_dir,
-              update_a_cust_dir, update_a_addr_dir, update_b_cust_dir, update_b_addr_dir,
-              update_c_cust_dir, update_c_addr_dir]:
-        os.makedirs(d, exist_ok=True)
-    
-    num_months = 1
-    num_days = num_months * 30
+    # --- Directory structure ---
+    dirs = {}
+    for src in [SOURCE_FREG, SOURCE_BS, SOURCE_NICE]:
+        for kind in ['customer', 'address']:
+            for phase in ['initial', 'update']:
+                key       = f"{phase}_{src}_{kind}"
+                dirs[key] = os.path.join(OUTPUT_DIR, phase, src, kind)
+                os.makedirs(dirs[key], exist_ok=True)
+
+    num_months   = 1
+    num_days     = num_months * 30
     initial_date = (datetime.now(timezone.utc) - timedelta(days=num_days)).strftime('%Y-%m-%d')
-    
-    write_customer_csv_a(crm_a_customers, os.path.join(initial_a_cust_dir, f'{initial_date}_crm_a_customers.csv'))
-    write_customer_csv_b(crm_b_customers, os.path.join(initial_b_cust_dir, f'{initial_date}_crm_b_customers.csv'))
-    write_customer_csv_c(crm_c_customers, os.path.join(initial_c_cust_dir, f'{initial_date}_crm_c_customers.csv'))
-    write_address_csv_a(crm_a_addresses, os.path.join(initial_a_addr_dir, f'{initial_date}_crm_a_addresses.csv'))
-    write_address_csv_b(crm_b_addresses, os.path.join(initial_b_addr_dir, f'{initial_date}_crm_b_addresses.csv'))
-    write_address_csv_c(crm_c_addresses, os.path.join(initial_c_addr_dir, f'{initial_date}_crm_c_addresses.csv'))
-    
+
+    # --- Initial load CSVs ---
+    write_freg_customer_csv(freg_customers,
+        os.path.join(dirs['initial_FREG_customer'], f'{initial_date}_crm_freg_customers.csv'))
+    write_bs_customer_csv(bs_customers,
+        os.path.join(dirs['initial_BS_customer'],   f'{initial_date}_crm_bs_customers.csv'))
+    write_nice_customer_csv(nice_customers,
+        os.path.join(dirs['initial_NICE_customer'], f'{initial_date}_crm_nice_customers.csv'))
+    write_address_csv(freg_addresses,
+        os.path.join(dirs['initial_FREG_address'],  f'{initial_date}_crm_freg_addresses.csv'))
+    write_address_csv(bs_addresses,
+        os.path.join(dirs['initial_BS_address'],    f'{initial_date}_crm_bs_addresses.csv'))
+    write_address_csv(nice_addresses,
+        os.path.join(dirs['initial_NICE_address'],  f'{initial_date}_crm_nice_addresses.csv'))
+
     print(f"Initial load: {initial_date}")
     print(f"Generating {num_days} days of updates...")
-    
-    for day in range(1, num_days + 1):
-        update_date = (datetime.now(timezone.utc) - timedelta(days=num_days) + timedelta(days=day)).strftime('%Y-%m-%d')
-        
-        updates_a_cust = generate_daily_updates_customers(crm_a_customers, 'A', day, change_rate=0.01)
-        updates_b_cust = generate_daily_updates_customers(crm_b_customers, 'B', day, change_rate=0.01)
-        updates_c_cust = generate_daily_updates_customers(crm_c_customers, 'C', day, change_rate=0.01)
-        updates_a_addr = generate_daily_updates_addresses(crm_a_addresses, 'A', day, change_rate=0.015)
-        updates_b_addr = generate_daily_updates_addresses(crm_b_addresses, 'B', day, change_rate=0.015)
-        updates_c_addr = generate_daily_updates_addresses(crm_c_addresses, 'C', day, change_rate=0.015)
 
-        if updates_a_cust:
-            write_customer_csv_a(updates_a_cust, os.path.join(update_a_cust_dir, f'{update_date}_crm_a_customers.csv'))
-        if updates_b_cust:
-            write_customer_csv_b(updates_b_cust, os.path.join(update_b_cust_dir, f'{update_date}_crm_b_customers.csv'))
-        if updates_c_cust:
-            write_customer_csv_c(updates_c_cust, os.path.join(update_c_cust_dir, f'{update_date}_crm_c_customers.csv'))
-        if updates_a_addr:
-            write_address_csv_a(updates_a_addr, os.path.join(update_a_addr_dir, f'{update_date}_crm_a_addresses.csv'))
-        if updates_b_addr:
-            write_address_csv_b(updates_b_addr, os.path.join(update_b_addr_dir, f'{update_date}_crm_b_addresses.csv'))
-        if updates_c_addr:
-            write_address_csv_c(updates_c_addr, os.path.join(update_c_addr_dir, f'{update_date}_crm_c_addresses.csv'))
-        
+    # --- Daily update CSVs (SCD Type 2) ---
+    for day in range(1, num_days + 1):
+        upd_date = (datetime.now(timezone.utc)
+                    - timedelta(days=num_days)
+                    + timedelta(days=day)).strftime('%Y-%m-%d')
+
+        upd_freg      = generate_daily_updates_freg(freg_customers, day)
+        upd_bs        = generate_daily_updates_bs_or_nice(bs_customers, day)
+        upd_nice      = generate_daily_updates_bs_or_nice(nice_customers, day)
+        upd_freg_addr = generate_daily_updates_addresses(freg_addresses, day)
+        upd_bs_addr   = generate_daily_updates_addresses(bs_addresses, day)
+        upd_nice_addr = generate_daily_updates_addresses(nice_addresses, day)
+
+        if upd_freg:
+            write_freg_customer_csv(upd_freg,
+                os.path.join(dirs['update_FREG_customer'], f'{upd_date}_crm_freg_customers.csv'))
+        if upd_bs:
+            write_bs_customer_csv(upd_bs,
+                os.path.join(dirs['update_BS_customer'],   f'{upd_date}_crm_bs_customers.csv'))
+        if upd_nice:
+            write_nice_customer_csv(upd_nice,
+                os.path.join(dirs['update_NICE_customer'], f'{upd_date}_crm_nice_customers.csv'))
+        if upd_freg_addr:
+            write_address_csv(upd_freg_addr,
+                os.path.join(dirs['update_FREG_address'],  f'{upd_date}_crm_freg_addresses.csv'))
+        if upd_bs_addr:
+            write_address_csv(upd_bs_addr,
+                os.path.join(dirs['update_BS_address'],    f'{upd_date}_crm_bs_addresses.csv'))
+        if upd_nice_addr:
+            write_address_csv(upd_nice_addr,
+                os.path.join(dirs['update_NICE_address'],  f'{upd_date}_crm_nice_addresses.csv'))
+
         if day % 30 == 0:
-            print(f"  Month {day // 30}: {update_date}")
-    
-    print_test_coverage_report(crm_a_customers, crm_b_customers, crm_c_customers, crm_a_addresses, crm_b_addresses, crm_c_addresses)
-    
-    print("\n" + "-"*70)
+            print(f"  Month {day // 30}: {upd_date}")
+
+    print_report(
+        freg_customers, bs_customers, nice_customers,
+        freg_addresses, bs_addresses, nice_addresses,
+        fuzzy_count=FUZZY_COUNT,
+        steward_count=STEWARD_COUNT,
+        cross_org_count=CROSS_ORG,
+    )
+
+    print("-" * 70)
     print("SCD TYPE 2 TEST DATA SUMMARY")
-    print("-"*70)
-    print(f"Initial load:     {os.path.join(OUTPUT_DIR, 'initial')}/")
-    print(f"                  {initial_date}_*.csv")
-    print(f"Daily updates:    {os.path.join(OUTPUT_DIR, 'update')}/")
-    print(f"                  {num_days} days ({num_months} months) of incremental changes")
-    print(f"                  - ~1% customer changes per day")
-    print(f"                  - ~1.5% address changes per day")
+    print("-" * 70)
+    print(f"Initial load:  {os.path.join(OUTPUT_DIR, 'initial')}/")
+    print(f"               {initial_date}_crm_*.csv")
+    print(f"Daily updates: {os.path.join(OUTPUT_DIR, 'update')}/")
+    print(f"               {num_days} days ({num_months} month) of incremental changes")
+    print(f"               ~0.5 % FREG changes/day, ~1 % BS/NICE changes/day")
     print(f"\nDirectory structure:")
-    print(f"  output/initial/A/customer/")
-    print(f"  output/initial/A/address/")
-    print(f"  output/initial/B/customer/")
-    print(f"  output/initial/B/address/")
-    print(f"  output/update/A/customer/")
-    print(f"  output/update/A/address/")
-    print(f"  output/update/B/customer/")
-    print(f"  output/update/B/address/")
-    print(f"  output/initial/C/customer/")
-    print(f"  output/initial/C/address/")
-    print(f"  output/update/C/customer/")
-    print(f"  output/update/C/address/")
-    print("-"*70 + "\n")
+    for src in [SOURCE_FREG, SOURCE_BS, SOURCE_NICE]:
+        for phase in ['initial', 'update']:
+            print(f"  output/{phase}/{src}/customer/")
+            print(f"  output/{phase}/{src}/address/")
+    print("-" * 70 + "\n")
 
 
 if __name__ == '__main__':

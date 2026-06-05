@@ -17,6 +17,8 @@ pipeline_choice = st.sidebar.radio(
 )
 suffix = PIPELINE_SUFFIX[pipeline_choice]
 
+org_filter = st.sidebar.selectbox("Organization", ["Both", "BANK", "INS"])
+
 @st.cache_data(ttl=timedelta(minutes=5))
 def load_customers(sfx: str):
     return conn.query(f"""
@@ -34,8 +36,8 @@ def load_customers(sfx: str):
 @st.cache_data(ttl=timedelta(minutes=5))
 def load_addresses(sfx: str):
     return conn.query(f"""
-        SELECT address_id, customer_id, address_type, street, city,
-               postal_code, country, is_primary
+        SELECT address_id, customer_id, address_type, gate, "BY" AS by,
+               postnummer, land, is_primary
         FROM MDM_DEV.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES{sfx}
         ORDER BY address_id
     """)
@@ -76,8 +78,8 @@ def load_customer_history(sfx: str):
 @st.cache_data(ttl=timedelta(minutes=5))
 def load_address_history(sfx: str):
     return conn.query(f"""
-        SELECT address_id, customer_id, address_type, street, city,
-               postal_code, country, is_primary, valid_from,
+        SELECT address_id, customer_id, address_type, gate, "BY" AS by,
+               postnummer, land, is_primary, valid_from,
                CASE WHEN valid_to >= '2099-01-01' THEN NULL ELSE valid_to END AS valid_to,
                is_valid
         FROM MDM_DEV.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_HISTORY{sfx}
@@ -116,16 +118,16 @@ def load_address_stats(sfx: str):
         SELECT
             COUNT(*) AS total_addresses,
             COUNT(DISTINCT customer_id) AS customers_with_address,
-            COUNT(DISTINCT country) AS country_count
+            COUNT(DISTINCT land) AS country_count
         FROM MDM_DEV.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES{sfx}
     """)
 
 @st.cache_data(ttl=timedelta(minutes=5))
 def load_address_country_dist(sfx: str):
     return conn.query(f"""
-        SELECT country, COUNT(*) AS address_count
+        SELECT land, COUNT(*) AS address_count
         FROM MDM_DEV.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES{sfx}
-        GROUP BY country
+        GROUP BY land
         ORDER BY address_count DESC
     """)
 
@@ -157,9 +159,10 @@ addr_source_counts = load_address_source_counts()
 st.title(":busts_in_silhouette: Customer 360 — MDM Dashboard")
 st.caption(f"Pipeline: **{pipeline_choice}**")
 
-tab_overview, tab_search, tab_dq, tab_er, tab_history = st.tabs(
+tab_overview, tab_search, tab_dq, tab_er, tab_history, tab_steward, tab_cross_org = st.tabs(
     [":bar_chart: Overview", ":mag: Customer Search", ":white_check_mark: Data Quality",
-     ":link: Entity Resolution", ":clock3: SCD History"]
+     ":link: Entity Resolution", ":clock3: SCD History",
+     ":inbox_tray: Data Steward Queue", ":globe_with_meridians: Cross-Org"]
 )
 
 # --- OVERVIEW ---
@@ -203,7 +206,7 @@ with tab_overview:
         with st.container(border=True):
             st.subheader("Addresses by Country")
             if len(country_dist):
-                st.bar_chart(country_dist, x="COUNTRY", y="ADDRESS_COUNT")
+                st.bar_chart(country_dist, x="LAND", y="ADDRESS_COUNT")
         with st.container(border=True):
             st.subheader("Source Contribution")
             if len(addr_source_counts):
@@ -212,12 +215,12 @@ with tab_overview:
     with st.container(border=True):
         st.subheader("Top 20 Golden Records (Customers + Addresses)")
         top20 = customers_df.head(20).merge(
-            addresses_df[["CUSTOMER_ID", "STREET", "CITY", "COUNTRY"]],
+            addresses_df[["CUSTOMER_ID", "GATE", "BY", "LAND"]],
             on="CUSTOMER_ID", how="left",
         )
         st.dataframe(
             top20[["CUSTOMER_ID", "FULL_NAME", "EMAIL", "PHONE", "DQ_SCORE",
-                   "DQ_TIER", "SOURCE_COUNT", "STREET", "CITY", "COUNTRY"]],
+                   "DQ_TIER", "SOURCE_COUNT", "GATE", "BY", "LAND"]],
             hide_index=True, width="stretch",
         )
 
@@ -237,9 +240,9 @@ with tab_search:
     filtered = customers_df[customers_df["DQ_TIER"].isin(dq_filter)]
     if search_term:
         addr_match_ids = addresses_df[
-            addresses_df["CITY"].str.contains(search_term, case=False, na=False)
-            | addresses_df["STREET"].str.contains(search_term, case=False, na=False)
-            | addresses_df["COUNTRY"].str.contains(search_term, case=False, na=False)
+            addresses_df["BY"].str.contains(search_term, case=False, na=False)
+            | addresses_df["GATE"].str.contains(search_term, case=False, na=False)
+            | addresses_df["LAND"].str.contains(search_term, case=False, na=False)
         ]["CUSTOMER_ID"].unique()
         mask = (
             filtered["FULL_NAME"].str.contains(search_term, case=False, na=False)
@@ -280,8 +283,8 @@ with tab_search:
                         for _, a in addr.iterrows():
                             primary_tag = " :star:" if a["IS_PRIMARY"] else ""
                             st.write(f"**{a['ADDRESS_TYPE']}**{primary_tag}")
-                            st.write(f"{a['STREET']}")
-                            st.write(f"{a['CITY']}, {a['POSTAL_CODE']}, {a['COUNTRY']}")
+                            st.write(f"{a['GATE']}")
+                            st.write(f"{a['BY']}, {a['POSTNUMMER']}, {a['LAND']}")
                             st.write("---")
                     else:
                         st.write("No address on file")
@@ -344,12 +347,12 @@ with tab_dq:
         with st.container(border=True):
             st.subheader("Address Completeness")
             completeness_checks = addresses_df.copy()
-            missing_street = completeness_checks["STREET"].isna().sum()
-            missing_city = completeness_checks["CITY"].isna().sum()
-            missing_postal = completeness_checks["POSTAL_CODE"].isna().sum()
-            missing_country = completeness_checks["COUNTRY"].isna().sum()
+            missing_street = completeness_checks["GATE"].isna().sum()
+            missing_city = completeness_checks["BY"].isna().sum()
+            missing_postal = completeness_checks["POSTNUMMER"].isna().sum()
+            missing_country = completeness_checks["LAND"].isna().sum()
             comp_df = pd.DataFrame({
-                "Field": ["Street", "City", "Postal Code", "Country"],
+                "Field": ["Gate", "By", "Postnummer", "Land"],
                 "Missing": [int(missing_street), int(missing_city), int(missing_postal), int(missing_country)],
                 "Complete": [
                     int(total_addr - missing_street), int(total_addr - missing_city),
@@ -366,7 +369,7 @@ with tab_dq:
 
         with st.container(border=True):
             st.subheader("Addresses by Country")
-            st.bar_chart(country_dist, x="COUNTRY", y="ADDRESS_COUNT")
+            st.bar_chart(country_dist, x="LAND", y="ADDRESS_COUNT")
 
 # --- ENTITY RESOLUTION ---
 with tab_er:
@@ -414,7 +417,7 @@ with tab_er:
         with st.container(border=True):
             st.subheader("Full Address List (sample)")
             st.dataframe(
-                addresses_df.head(50)[["ADDRESS_ID", "CUSTOMER_ID", "STREET", "CITY", "POSTAL_CODE", "COUNTRY"]],
+                addresses_df.head(50)[["ADDRESS_ID", "CUSTOMER_ID", "GATE", "BY", "POSTNUMMER", "LAND"]],
                 hide_index=True, width="stretch",
             )
 
@@ -453,3 +456,30 @@ with tab_history:
             addr_hist = addr_history_df[addr_history_df["ADDRESS_ID"] == hist_address].sort_values("VALID_FROM")
             st.write(f"{len(addr_hist)} version(s)")
             st.dataframe(addr_hist, hide_index=True, width="stretch")
+
+# --- DATA STEWARD QUEUE ---
+with tab_steward:
+    st.header("Data Steward Queue")
+    st.caption("Records that could not be matched automatically and require manual review")
+    org_where = f"WHERE ORGANIZATION = '{org_filter}'" if org_filter != "Both" else ""
+    steward_q = f"""
+        SELECT SOURCE_SYSTEM, ORGANIZATION, FIRST_NAME, LAST_NAME, PHONE, EMAIL, RECORD_DATE
+        FROM MDM_DEV.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_STEWARD_QUEUE{suffix}
+        {org_where}
+        ORDER BY RECORD_DATE DESC
+    """
+    steward_df = conn.query(steward_q, ttl=300)
+    st.metric("Unresolved Records", len(steward_df))
+    st.dataframe(steward_df, use_container_width=True)
+
+# --- CROSS-ORG ---
+with tab_cross_org:
+    st.header("Cross-Organization Customers")
+    st.caption("Customers identified in both BANK and INS organizations via SSN linkage")
+    cross_df = conn.query("""
+        SELECT SSN, BANK_FIRST_NAME, BANK_LAST_NAME, BANK_EMAIL, INS_EMAIL, CITIZENSHIP, BIRTH_DATE
+        FROM MDM_DEV.MDM_SRV_v001.CRMS_AGG_VW_CUSTOMER_360_CROSS_ORG
+        ORDER BY BANK_LAST_NAME
+    """, ttl=300)
+    st.metric("Shared Customers (BANK ∩ INS)", len(cross_df))
+    st.dataframe(cross_df, use_container_width=True)

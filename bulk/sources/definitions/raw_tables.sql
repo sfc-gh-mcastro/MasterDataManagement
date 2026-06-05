@@ -1,64 +1,91 @@
 -- =============================================================================
--- raw_tables.sql — Append-only RAW tables for customer and address ingestion
+-- raw_tables.sql — Append-only RAW tables for Norwegian MDM ingestion
+-- Source systems: FREG (national register), BS (bank system), NICE (CRM)
 -- =============================================================================
 
-DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_CUSTOMER_A (
-    SRC_CUSTOMER_ID VARCHAR(50) NOT NULL COMMENT 'Original customer identifier from CRM A system',
-    FIRST_NAME VARCHAR(100) COMMENT 'Customer given name as recorded in CRM A',
-    LAST_NAME VARCHAR(100) COMMENT 'Customer family name as recorded in CRM A',
-    EMAIL VARCHAR(255) COMMENT 'Customer email address',
-    PHONE VARCHAR(50) COMMENT 'Customer phone number in original format',
-    _SOURCE_FILE VARCHAR(500) COMMENT 'Source filename for data lineage'
-)
-COMMENT = 'Append-only raw data from CRM A (legacy system).';
+-- ---------------------------------------------------------------------------
+-- Customer tables
+-- ---------------------------------------------------------------------------
 
-DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_CUSTOMER_B (
-    CUSTOMER_KEY VARCHAR(50) NOT NULL COMMENT 'Original customer identifier from CRM B system',
-    NAME VARCHAR(200) COMMENT 'Full customer name (first + last combined)',
-    EMAIL_ADDRESS VARCHAR(255) COMMENT 'Customer email address',
-    MOBILE VARCHAR(50) COMMENT 'Customer mobile phone number',
-    _SOURCE_FILE VARCHAR(500) COMMENT 'Source filename for data lineage'
+DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_FREG (
+    SSN           VARCHAR(11)  NOT NULL COMMENT 'Norwegian personnummer (DDMMYYXXXCC, modulus-11)',
+    FIRST_NAME    VARCHAR(100) COMMENT 'Given name as recorded in Folkeregisteret',
+    LAST_NAME     VARCHAR(100) COMMENT 'Family name as recorded in Folkeregisteret',
+    BIRTH_DATE    DATE         COMMENT 'Date of birth derived from personnummer',
+    CITIZENSHIP   VARCHAR(5)   COMMENT 'ISO 3166-1 alpha-2 country code (NO, SE, PL, LT, ...)',
+    RECORD_DATE   DATE         COMMENT 'Date this record was effective in FREG',
+    _SOURCE_FILE  VARCHAR(500) COMMENT 'Source filename for data lineage (metadata$filename)'
 )
-COMMENT = 'Append-only raw data from CRM B (acquired company).';
+COMMENT = 'Append-only raw data from FREG — Folkeregisteret (Norwegian national population register). '
+          'Highest trust source. No phone, email, or organization field.';
 
-DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_CUSTOMER_C (
-    TICKET_CUSTOMER_ID VARCHAR(50) NOT NULL COMMENT 'Original customer identifier from CRM C call center',
-    CALLER_NAME VARCHAR(200) COMMENT 'Full caller name as recorded by call center agent',
-    CALLBACK_EMAIL VARCHAR(255) COMMENT 'Callback email address',
-    CALLBACK_PHONE VARCHAR(50) COMMENT 'Callback phone number',
-    _SOURCE_FILE VARCHAR(500) COMMENT 'Source filename for data lineage'
+DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_BS (
+    SSN           VARCHAR(11)  NOT NULL COMMENT 'Norwegian personnummer (DDMMYYXXXCC, modulus-11)',
+    FIRST_NAME    VARCHAR(100) COMMENT 'Customer given name as recorded in bank system',
+    LAST_NAME     VARCHAR(100) COMMENT 'Customer family name as recorded in bank system',
+    PHONE         VARCHAR(20)  COMMENT 'Customer phone number — expected +47XXXXXXXX format',
+    EMAIL         VARCHAR(255) COMMENT 'Customer email address',
+    RECORD_DATE   DATE         COMMENT 'Date this record was effective in BS',
+    ORGANIZATION  VARCHAR(10)  COMMENT 'Business line: BANK or INS (insurance)',
+    _SOURCE_FILE  VARCHAR(500) COMMENT 'Source filename for data lineage (metadata$filename)'
 )
-COMMENT = 'Append-only raw data from CRM C (call center system).';
+COMMENT = 'Append-only raw data from BS — Bank System. '
+          'Mid-trust source. Includes phone, email, and organization (BANK/INS).';
 
-DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_ADDRESSES_A (
-    SRC_ADDRESS_ID VARCHAR(50) NOT NULL COMMENT 'Original address identifier from CRM A',
-    SRC_CUSTOMER_ID VARCHAR(50) NOT NULL COMMENT 'Customer identifier linking address to owner',
-    STREET VARCHAR(255) COMMENT 'Street address including house number',
-    CITY VARCHAR(100) COMMENT 'City or municipality name',
-    POSTAL_CODE VARCHAR(20) COMMENT 'Postal or ZIP code',
-    COUNTRY VARCHAR(10) COMMENT 'Country code (ISO 3166-1 alpha-2)',
-    _SOURCE_FILE VARCHAR(500) COMMENT 'Source filename for data lineage'
+DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_NICE (
+    SSN           VARCHAR(11)  COMMENT 'Norwegian personnummer — nullable (~30 % of records have no SSN). '
+                                       'NULL drives fuzzy-only matching and data steward queue scenarios.',
+    FIRST_NAME    VARCHAR(100) COMMENT 'Customer given name as recorded in NICE CRM',
+    LAST_NAME     VARCHAR(100) COMMENT 'Customer family name as recorded in NICE CRM',
+    PHONE         VARCHAR(20)  COMMENT 'Customer phone number — expected +47XXXXXXXX format',
+    EMAIL         VARCHAR(255) COMMENT 'Customer email address',
+    RECORD_DATE   DATE         COMMENT 'Date this record was effective in NICE',
+    ORGANIZATION  VARCHAR(10)  COMMENT 'Business line: BANK or INS (insurance)',
+    _SOURCE_FILE  VARCHAR(500) COMMENT 'Source filename for data lineage (metadata$filename)'
 )
-COMMENT = 'Append-only raw address data from CRM A (legacy system).';
+COMMENT = 'Append-only raw data from NICE — CRM/call-centre system. '
+          'Lowest trust source. SSN is nullable; ~30 % of records lack SSN, '
+          'exercising fuzzy name/phone matching and data steward queue scenarios.';
 
-DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_ADDRESSES_B (
-    ADDR_ID VARCHAR(50) NOT NULL COMMENT 'Original address identifier from CRM B',
-    CUSTOMER_KEY VARCHAR(50) NOT NULL COMMENT 'Customer identifier linking address to owner',
-    ADDRESS_LINE VARCHAR(255) COMMENT 'Full street address as single line',
-    CITY VARCHAR(100) COMMENT 'City or municipality name',
-    ZIP VARCHAR(20) COMMENT 'ZIP or postal code',
-    COUNTRY_CODE VARCHAR(10) COMMENT 'Country code as stored in CRM B',
-    _SOURCE_FILE VARCHAR(500) COMMENT 'Source filename for data lineage'
-)
-COMMENT = 'Append-only raw address data from CRM B (acquired company).';
+-- ---------------------------------------------------------------------------
+-- Address tables
+-- ---------------------------------------------------------------------------
 
-DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_ADDRESSES_C (
-    ADDR_REF VARCHAR(50) NOT NULL COMMENT 'Original address reference from CRM C',
-    TICKET_CUSTOMER_ID VARCHAR(50) NOT NULL COMMENT 'Customer identifier linking address to owner',
-    LOCATION VARCHAR(255) COMMENT 'Street address as recorded by call center agent',
-    TOWN VARCHAR(100) COMMENT 'Town or city name',
-    POSTCODE VARCHAR(20) COMMENT 'Postal code',
-    COUNTRY VARCHAR(10) COMMENT 'Country code',
-    _SOURCE_FILE VARCHAR(500) COMMENT 'Source filename for data lineage'
+DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_ADDRESSES_FREG (
+    SRC_ADDRESS_ID  VARCHAR(50)  NOT NULL COMMENT 'Unique address identifier from FREG',
+    SRC_CUSTOMER_ID VARCHAR(50)  NOT NULL COMMENT 'FK to CRMI_RAW_TB_FREG.SSN',
+    GATE            VARCHAR(255) COMMENT 'Norwegian street address including house number (e.g. Storgata 12)',
+    POSTNUMMER      VARCHAR(4)   COMMENT '4-digit Norwegian postal code',
+    BY              VARCHAR(100) COMMENT 'Norwegian city or municipality (by/kommune)',
+    LAND            VARCHAR(5)   COMMENT 'ISO 3166-1 alpha-2 country code (default NO)',
+    _SOURCE_FILE    VARCHAR(500) COMMENT 'Source filename for data lineage (metadata$filename)'
 )
-COMMENT = 'Append-only raw address data from CRM C (call center system).';
+COMMENT = 'Append-only raw address data from FREG (Folkeregisteret). '
+          'Norwegian address format: gate, 4-digit postnummer, by, land.';
+
+DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_ADDRESSES_BS (
+    SRC_ADDRESS_ID  VARCHAR(50)  NOT NULL COMMENT 'Unique address identifier from BS',
+    SRC_CUSTOMER_ID VARCHAR(50)  NOT NULL COMMENT 'FK to CRMI_RAW_TB_BS.SSN',
+    GATE            VARCHAR(255) COMMENT 'Norwegian street address including house number',
+    POSTNUMMER      VARCHAR(4)   COMMENT '4-digit Norwegian postal code',
+    BY              VARCHAR(100) COMMENT 'Norwegian city or municipality',
+    LAND            VARCHAR(5)   COMMENT 'ISO 3166-1 alpha-2 country code (default NO)',
+    _SOURCE_FILE    VARCHAR(500) COMMENT 'Source filename for data lineage (metadata$filename)'
+)
+COMMENT = 'Append-only raw address data from BS — Bank System. '
+          'Norwegian address format: gate, 4-digit postnummer, by, land.';
+
+DEFINE TABLE {{db}}.{{raw_schema}}.CRMI_RAW_TB_ADDRESSES_NICE (
+    SRC_ADDRESS_ID  VARCHAR(50)  NOT NULL COMMENT 'Unique address identifier from NICE',
+    SRC_CUSTOMER_ID VARCHAR(50)  NOT NULL COMMENT 'FK to CRMI_RAW_TB_NICE — may be SSN or '
+                                                   'system-generated ID when SSN is null',
+    GATE            VARCHAR(255) COMMENT 'Norwegian street address including house number',
+    POSTNUMMER      VARCHAR(4)   COMMENT '4-digit Norwegian postal code',
+    BY              VARCHAR(100) COMMENT 'Norwegian city or municipality',
+    LAND            VARCHAR(5)   COMMENT 'ISO 3166-1 alpha-2 country code (default NO)',
+    _SOURCE_FILE    VARCHAR(500) COMMENT 'Source filename for data lineage (metadata$filename)'
+)
+COMMENT = 'Append-only raw address data from NICE CRM. '
+          'Norwegian address format: gate, 4-digit postnummer, by, land. '
+          'SRC_CUSTOMER_ID is SSN when available, else a NICE-internal row key '
+          '(for records without personnummer).';

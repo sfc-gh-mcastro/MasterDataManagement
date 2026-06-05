@@ -26,7 +26,7 @@ MasterDataManagement/
 
 Organizations running multiple systems that keep similar types of data -- such as CRM, ERP, or billing -- face a common problem: the same entity (customer, product, account) exists as separate, conflicting records across systems. There is no single source of truth, data quality is unknown, and historical changes are invisible. Commercial MDM platforms solve this but at significant complexity and cost.
 
-This project proves that **Snowflake alone** delivers core MDM capabilities -- entity resolution, survivorship, data quality scoring, SCD Type 2 history, and a 360 view -- using only native features. The showcase uses **CRM customer data** as the example domain.
+This project proves that **Snowflake alone** delivers core MDM capabilities -- entity resolution, survivorship, data quality scoring, SCD Type 2 history, and a 360 view -- using only native features. The showcase uses **Norwegian banking customer master data (grunndata) using personnummer as the primary identifier** as the example domain.
 
 ## What
 
@@ -46,20 +46,31 @@ The Showcase is a  fully functional MDM pipeline that merges **1,800 customer re
 
 | Source | Description       | Trust | Records | Entities          |
 |--------|-------------------|-------|---------|-------------------|
-| CRM_A  | Legacy system     | 1     | 780     | Customer, Address |
-| CRM_B  | Acquired company  | 2     | 520     | Customer, Address |
-| CRM_C  | Call center       | 3     | 500     | Customer, Address |
+| FREG   | Folkeregisteret (Norwegian national population register) | 1 | ~400 | Customer |
+| BS     | Bank System       | 2     | ~500    | Customer, Address |
+| NICE   | CRM System        | 3     | ~600    | Customer, Address |
 
 ### Key Metrics (E2E Tested)
 
-| Metric                | Value                    |
-|-----------------------|--------------------------|
-| Source records        | 1,800 (780 + 520 + 500) |
-| Golden records        | 1,115                    |
-| Merged (2+ sources)   | ~300 customers           |
-| Merge rate            | 38%                      |
-| Avg DQ score          | ~95                      |
-| DQ Excellent (90-100) | ~970 records             |
+| Metric                | Value                                                  |
+|-----------------------|--------------------------------------------------------|
+| Source records        | ~1,500 (400 FREG + 500 BS + 600 NICE)                 |
+| Organizations         | 2 (BANK and INS)                                       |
+| Primary key           | Personnummer (Norwegian SSN, 11-digit modulus-11)      |
+| Golden records        | TBD (pending data generation)                          |
+| Merged (2+ sources)   | TBD                                                    |
+| Avg DQ score          | TBD                                                    |
+
+### POC Scenarios
+
+| # | Scenario | Description |
+|---|----------|-------------|
+| 1 | BANK Initial Load | Load FREG + BS records for BANK organization |
+| 2 | INS Initial Load | Load FREG + NICE records for INS organization |
+| 3 | Fuzzy-Only Match | NICE records without SSN matched via name/phone similarity |
+| 4 | Data Steward Queue | Records with no SSN and no fuzzy match — requires manual review |
+| 5 | Unmerge | Split a previously merged golden record using the unmerge override table |
+| 6 | Cross-Org Exchange | Customer appearing in both BANK and INS, linked by personnummer |
 
 ### Scope
 
@@ -75,6 +86,7 @@ The Showcase is a  fully functional MDM pipeline that merges **1,800 customer re
 | EX-04 | Advanced governance       | GDPR/CCPA consent, retention policies               | Tags/masking planned (OP-05)            |
 | EX-05 | Multi-address             | N:M relationships, org hierarchies                  | 1:1 model; N:M planned (OP-07)         |
 | EX-06 | Production observability  | Health dashboards, error queues, SLAs               | DMF monitoring planned (OP-06)          |
+| EX-07 | NRT source renaming       | NRT pipeline retains CRM_A/B/C naming               | Out of HOL scope                        |
 
 ### Capabilities & Snowflake Features
 
@@ -111,15 +123,15 @@ The Showcase is a  fully functional MDM pipeline that merges **1,800 customer re
 | next     | TB, DT, VW, ST, FF, TS, SM | Object type |
 | last     | name | Descriptive name + source suffix |
 
-**Examples:** `CRMI_RAW_TB_CUSTOMER_A`, `CRMA_AGG_DT_CUSTOMER_AI`, `CRMA_AGG_DT_CUSTOMER_FUZZY`, `CRMS_AGG_VW_CUSTOMER_360_AI`
+**Examples:** `CRMI_RAW_TB_FREG`, `CRMA_AGG_DT_CUSTOMER_AI`, `CRMA_AGG_DT_CUSTOMER_FUZZY`, `CRMS_AGG_VW_CUSTOMER_360_AI`
 
 ### Architecture
 
 Two isolated pipelines run in parallel from the same source data:
 
 ```
-  CRM_A (CSV)            CRM_B (CSV)            CRM_C (CSV)
-  Trust=1                Trust=2                Trust=3
+  FREG (National Register)  BS (Bank System)       NICE (CRM)
+  Trust=1                   Trust=2                Trust=3
       |                      |                      |
       v                      v                      v
 +------------------------------------------------------------------------+
@@ -272,11 +284,11 @@ Step 4 — Score              Data quality rules run AFTER survivorship on the g
 
 **Concrete example — 3 records, 1 golden:**
 
-| Field        | CRM A (trust 1)       | CRM B (trust 2)       | CRM C (trust 3) | Golden Record winner          |
-|--------------|-----------------------|-----------------------|------------------|-------------------------------|
+| Field        | FREG (trust 1)        | BS (trust 2)          | NICE (trust 3)  | Golden Record winner          |
+|--------------|-----------------------|-----------------------|-----------------|-------------------------------|
 | `first_name` | `Bill`                | `William`             | *(null)*         | `William` — most recent + len > 1 |
-| `last_name`  | `Smith`               | `Smith`               | `Smth`           | `Smith` — CRM A trust wins tie   |
-| `email`      | `bill@acme.com`       | *(null)*              | `b@test.xyz`     | `bill@acme.com` — CRM A + valid  |
+| `last_name`  | `Smith`               | `Smith`               | `Smth`           | `Smith` — FREG trust wins tie   |
+| `email`      | `bill@acme.com`       | *(null)*              | `b@test.xyz`     | `bill@acme.com` — FREG + valid  |
 | `phone`      | `+11043321819`        | `+110433218`          | *(null)*         | `+11043321819` — longest E.164   |
 | `dq_score`   |                       |                       |                  | 95 — scored on the golden row     |
 
@@ -286,9 +298,9 @@ For each group of matched records, survivorship determines which source value wi
 
 | Priority | Source | Trust Level | Description      |
 |----------|--------|-------------|------------------|
-| 1        | CRM A  | High        | Legacy system    |
-| 2        | CRM B  | Medium      | Acquired company |
-| 3        | CRM C  | Low         | Call center      |
+| 1        | FREG   | High        | National Register (Folkeregisteret) |
+| 2        | BS     | Medium      | Bank System      |
+| 3        | NICE   | Low         | CRM System       |
 
 | Attribute    | Winning Strategy                                                              | Fallback           |
 |--------------|-------------------------------------------------------------------------------|--------------------|
@@ -297,7 +309,7 @@ For each group of matched records, survivorship determines which source value wi
 | `email`      | Valid format (`LIKE '%@%'`) → source priority → most recent                    | Next source        |
 | `phone`      | Valid length (`>= 7`) → source priority → most recent                          | Next source        |
 
-Address attributes follow the same pattern: street (length >= 5), city (non-null), postal_code (non-null), country (CRM_A priority).
+Address attributes follow the same pattern: street (length >= 5), city (non-null), postal_code (non-null), country (FREG priority).
 
 ### Data Quality Rules
 
@@ -340,8 +352,8 @@ No stored procedures, no tasks, no imperative DML — just Dynamic Tables with `
 | # | Schema | Object | Type | Definition File |
 |---|--------|--------|------|-----------------|
 | 1-5 | -- | Database, Warehouse, 3 Schemas | Infra | `pre_deploy.sql` + `infrastructure.sql` |
-| 6-11 | `MDM_RAW_v001` | 6 Internal Stages (ST_CUSTOMER_A/B/C, ST_ADDRESSES_A/B/C) | Stage | `infrastructure.sql` |
-| 12-17 | `MDM_RAW_v001` | 6 RAW Tables (TB_CUSTOMER_A/B/C, TB_ADDRESSES_A/B/C) | Table | `raw_tables.sql` |
+| 6-11 | `MDM_RAW_v001` | 6 Internal Stages (ST_CUSTOMER_FREG/BS/NICE, ST_ADDRESSES_FREG/BS/NICE) | Stage | `infrastructure.sql` |
+| 12-17 | `MDM_RAW_v001` | 6 RAW Tables (TB_FREG, TB_BS, TB_NICE, TB_ADDRESSES_FREG/BS/NICE) | Table | `raw_tables.sql` |
 | 18-21 | `MDM_AGG_v001` | VW_CUSTOMER_UNION, VW_ADDRESSES_UNION + 4 XREF views (AI/FUZZY) | View | `views.sql` |
 | 22-39 | `MDM_AGG_v001` | 18 DTs: 9 AI pipeline + 9 FUZZY pipeline | DT | `analytics.sql` |
 | 40-43 | `MDM_SRV_v001` | VW_CUSTOMER_360_AI/FUZZY, VW_CUSTOMER_360_FLAT_AI/FUZZY | View | `serve.sql` |

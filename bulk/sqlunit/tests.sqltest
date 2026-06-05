@@ -10,12 +10,12 @@
 # POSITIVE TESTS — Object existence (RAW layer)
 # =============================================================================
 
-RAW customer table A exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_CUSTOMER_A'; | true
-RAW customer table B exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_CUSTOMER_B'; | true
-RAW customer table C exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_CUSTOMER_C'; | true
-RAW address table A exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_ADDRESSES_A'; | true
-RAW address table B exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_ADDRESSES_B'; | true
-RAW address table C exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_ADDRESSES_C'; | true
+RAW FREG table exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_FREG'; | true
+RAW BS table exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_BS'; | true
+RAW NICE table exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_NICE'; | true
+RAW addresses FREG table exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_ADDRESSES_FREG'; | true
+RAW addresses BS table exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_ADDRESSES_BS'; | true
+RAW addresses NICE table exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_ADDRESSES_NICE'; | true
 
 # =============================================================================
 # POSITIVE TESTS — Object existence (AI pipeline)
@@ -49,17 +49,20 @@ Serving view CUSTOMER_360_FLAT_FUZZY exists | SELECT CASE WHEN COUNT(*) > 0 THEN
 # POSITIVE TESTS — Data loaded (RAW layer has records)
 # =============================================================================
 
-RAW customer A has 600 records | SELECT CASE WHEN COUNT(*) = 600 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_RAW_v001.CRMI_RAW_TB_CUSTOMER_A; | true
-RAW customer B has 400 records | SELECT CASE WHEN COUNT(*) = 400 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_RAW_v001.CRMI_RAW_TB_CUSTOMER_B; | true
-RAW customer C has 500 records | SELECT CASE WHEN COUNT(*) = 500 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_RAW_v001.CRMI_RAW_TB_CUSTOMER_C; | true
-Total source records = 1500 | SELECT CASE WHEN (SELECT COUNT(*) FROM {{DATABASE}}.MDM_RAW_v001.CRMI_RAW_TB_CUSTOMER_A) + (SELECT COUNT(*) FROM {{DATABASE}}.MDM_RAW_v001.CRMI_RAW_TB_CUSTOMER_B) + (SELECT COUNT(*) FROM {{DATABASE}}.MDM_RAW_v001.CRMI_RAW_TB_CUSTOMER_C) = 1500 THEN 'true' ELSE 'false' END AS result; | true
+# TODO: update counts after data generation (target: FREG ~400, BS ~500, NICE ~600)
+RAW FREG has records | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_RAW_v001.CRMI_RAW_TB_FREG; | true
+RAW BS has records | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_RAW_v001.CRMI_RAW_TB_BS; | true
+RAW NICE has records | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_RAW_v001.CRMI_RAW_TB_NICE; | true
+# TODO: update total after data generation (target: ~1500)
+Total source records > 0 | SELECT CASE WHEN (SELECT COUNT(*) FROM {{DATABASE}}.MDM_RAW_v001.CRMI_RAW_TB_FREG) + (SELECT COUNT(*) FROM {{DATABASE}}.MDM_RAW_v001.CRMI_RAW_TB_BS) + (SELECT COUNT(*) FROM {{DATABASE}}.MDM_RAW_v001.CRMI_RAW_TB_NICE) > 0 THEN 'true' ELSE 'false' END AS result; | true
 
 # =============================================================================
 # POSITIVE TESTS — AI pipeline: Golden record counts and merge rate
 # =============================================================================
 
-AI: Golden records = 1115 | SELECT CASE WHEN COUNT(*) = 1115 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI; | true
-AI: Golden addresses = 1115 | SELECT CASE WHEN COUNT(*) = 1115 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_AI; | true
+# TODO: update golden record counts after data generation (org-partitioned — expect separate BANK+INS rows; previous non-partitioned count was 1115)
+AI: Golden records exist | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI; | true
+AI: Golden addresses exist | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_AI; | true
 AI: Merged customers (2+ sources) >= 270 | SELECT CASE WHEN COUNT(*) >= 270 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE source_count >= 2; | true
 AI: Three-source merges >= 35 | SELECT CASE WHEN COUNT(*) >= 35 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE source_count = 3; | true
 AI: Serving view count matches golden | SELECT CASE WHEN (SELECT COUNT(*) FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI) = (SELECT COUNT(*) FROM {{DATABASE}}.MDM_SRV_v001.CRMS_AGG_VW_CUSTOMER_360_AI) THEN 'true' ELSE 'false' END AS result; | true
@@ -109,33 +112,33 @@ FUZZY: Address DQ avg >= 80 | SELECT CASE WHEN AVG(dq_score) >= 80 THEN 'true' E
 # POSITIVE TESTS — AI pipeline: Address 1:1 relationship
 # =============================================================================
 
-AI: Every customer has an address | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI c WHERE NOT EXISTS (SELECT 1 FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_AI a WHERE a.customer_id = c.customer_id); | true
-AI: No customer has multiple addresses | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM (SELECT customer_id FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_AI GROUP BY customer_id HAVING COUNT(*) > 1); | true
+AI: Every customer has an address | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI c WHERE NOT EXISTS (SELECT 1 FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_AI a WHERE a.customer_group_id = c.customer_group_id); | true
+AI: No customer has multiple addresses | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM (SELECT customer_group_id FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_AI GROUP BY customer_group_id HAVING COUNT(*) > 1); | true
 
 # =============================================================================
 # POSITIVE TESTS — FUZZY pipeline: Address 1:1 relationship
 # =============================================================================
 
-FUZZY: Every customer has an address | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_FUZZY c WHERE NOT EXISTS (SELECT 1 FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_FUZZY a WHERE a.customer_id = c.customer_id); | true
-FUZZY: No customer has multiple addresses | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM (SELECT customer_id FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_FUZZY GROUP BY customer_id HAVING COUNT(*) > 1); | true
+FUZZY: Every customer has an address | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_FUZZY c WHERE NOT EXISTS (SELECT 1 FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_FUZZY a WHERE a.customer_group_id = c.customer_group_id); | true
+FUZZY: No customer has multiple addresses | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM (SELECT customer_group_id FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_FUZZY GROUP BY customer_group_id HAVING COUNT(*) > 1); | true
 
 # =============================================================================
 # POSITIVE TESTS — AI pipeline: SCD2 history integrity
 # =============================================================================
 
-AI: Every customer in history | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI c WHERE NOT EXISTS (SELECT 1 FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_HISTORY_AI h WHERE h.customer_id = c.customer_id AND h.is_valid = TRUE); | true
-AI: No customer with multiple valid history rows | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM (SELECT customer_id FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_HISTORY_AI WHERE is_valid = TRUE GROUP BY customer_id HAVING COUNT(*) > 1); | true
+AI: Every customer in history | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI c WHERE NOT EXISTS (SELECT 1 FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_HISTORY_AI h WHERE h.customer_group_id = c.customer_group_id AND h.is_valid = TRUE); | true
+AI: No customer with multiple valid history rows | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM (SELECT customer_group_id FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_HISTORY_AI WHERE is_valid = TRUE GROUP BY customer_group_id HAVING COUNT(*) > 1); | true
 AI: No historical row with VALID_TO = 9999-12-31 | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_HISTORY_AI WHERE is_valid = FALSE AND valid_to = '9999-12-31'::TIMESTAMP_LTZ; | true
-AI: Every address in history | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_AI a WHERE NOT EXISTS (SELECT 1 FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_HISTORY_AI h WHERE h.customer_id = a.customer_id AND h.is_valid = TRUE); | true
+AI: Every address in history | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_AI a WHERE NOT EXISTS (SELECT 1 FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_HISTORY_AI h WHERE h.customer_group_id = a.customer_group_id AND h.is_valid = TRUE); | true
 
 # =============================================================================
 # POSITIVE TESTS — FUZZY pipeline: SCD2 history integrity
 # =============================================================================
 
-FUZZY: Every customer in history | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_FUZZY c WHERE NOT EXISTS (SELECT 1 FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_HISTORY_FUZZY h WHERE h.customer_id = c.customer_id AND h.is_valid = TRUE); | true
-FUZZY: No customer with multiple valid history rows | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM (SELECT customer_id FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_HISTORY_FUZZY WHERE is_valid = TRUE GROUP BY customer_id HAVING COUNT(*) > 1); | true
+FUZZY: Every customer in history | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_FUZZY c WHERE NOT EXISTS (SELECT 1 FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_HISTORY_FUZZY h WHERE h.customer_group_id = c.customer_group_id AND h.is_valid = TRUE); | true
+FUZZY: No customer with multiple valid history rows | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM (SELECT customer_group_id FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_HISTORY_FUZZY WHERE is_valid = TRUE GROUP BY customer_group_id HAVING COUNT(*) > 1); | true
 FUZZY: No historical row with VALID_TO = 9999-12-31 | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_HISTORY_FUZZY WHERE is_valid = FALSE AND valid_to = '9999-12-31'::TIMESTAMP_LTZ; | true
-FUZZY: Every address in history | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_FUZZY a WHERE NOT EXISTS (SELECT 1 FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_HISTORY_FUZZY h WHERE h.customer_id = a.customer_id AND h.is_valid = TRUE); | true
+FUZZY: Every address in history | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_FUZZY a WHERE NOT EXISTS (SELECT 1 FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_ADDRESSES_HISTORY_FUZZY h WHERE h.customer_group_id = a.customer_group_id AND h.is_valid = TRUE); | true
 
 # =============================================================================
 # POSITIVE TESTS — AI pipeline: Completeness
@@ -175,9 +178,100 @@ No old VW_CUSTOMER_GOLDEN view (replaced by DT) | SELECT CASE WHEN COUNT(*) = 0 
 No old VW_ADDRESSES_GROUPS view (replaced by DT) | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '{{SCHEMA}}' AND TABLE_NAME = 'CRMA_AGG_VW_ADDRESSES_GROUPS' AND TABLE_TYPE = 'VIEW'; | true
 No old VW_ADDRESSES_GOLDEN view (replaced by DT) | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '{{SCHEMA}}' AND TABLE_NAME = 'CRMA_AGG_VW_ADDRESSES_GOLDEN' AND TABLE_TYPE = 'VIEW'; | true
 AI: No Poor DQ tier records | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE dq_score < 50; | true
-AI: No duplicate customer_ids in golden | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM (SELECT customer_id FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI GROUP BY customer_id HAVING COUNT(*) > 1); | true
-AI: No NULL customer_id in golden | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE customer_id IS NULL; | true
+AI: No duplicate customer_group_ids in golden | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM (SELECT customer_group_id FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI GROUP BY customer_group_id HAVING COUNT(*) > 1); | true
+AI: No NULL customer_group_id in golden | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE customer_group_id IS NULL; | true
 AI: No NULL source_count | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE source_count IS NULL OR source_count < 1; | true
-FUZZY: No duplicate customer_ids in golden | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM (SELECT customer_id FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_FUZZY GROUP BY customer_id HAVING COUNT(*) > 1); | true
-FUZZY: No NULL customer_id in golden | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_FUZZY WHERE customer_id IS NULL; | true
+FUZZY: No duplicate customer_group_ids in golden | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM (SELECT customer_group_id FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_FUZZY GROUP BY customer_group_id HAVING COUNT(*) > 1); | true
+FUZZY: No NULL customer_group_id in golden | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_FUZZY WHERE customer_group_id IS NULL; | true
 FUZZY: No NULL source_count | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_FUZZY WHERE source_count IS NULL OR source_count < 1; | true
+
+# =============================================================================
+# POC SCENARIO 1: BANK initial load (FREG + BS, SSN+First_Name+Last_Name match)
+# FAILING (TDD red): new RAW tables and golden 'organization' column don't exist
+# =============================================================================
+
+POC-1: RAW FREG table exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_FREG'; | true
+POC-1: RAW BS table exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_BS'; | true
+POC-1: golden record has organization column | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'MDM_AGG_v001' AND TABLE_NAME = 'CRMA_AGG_DT_CUSTOMER_AI' AND COLUMN_NAME = 'ORGANIZATION'; | true
+POC-1: BANK org golden records exist (AI pipeline) | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE organization = 'BANK'; | true
+POC-1: BANK merged records have non-null SSN (D01 composite match used SSN+name) | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE organization = 'BANK' AND source_count >= 2 AND ssn IS NOT NULL; | true
+POC-1: FREG source records feed both BANK and INS (org broadcasting via cross-join in union view) | SELECT CASE WHEN COUNT(DISTINCT organization) >= 2 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE SOURCE_SYSTEM LIKE '%FREG%'; | true
+
+# =============================================================================
+# POC SCENARIO 2: INS initial load (FREG + NICE, MDM_Processed_Date, all tracking tables)
+# FAILING (TDD red): 'organization', 'birth_date', 'citizenship', 'mdm_processed_date' columns missing
+# =============================================================================
+
+POC-2: INS org golden records exist (AI pipeline) | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE organization = 'INS'; | true
+POC-2: golden record has mdm_processed_date column | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'MDM_AGG_v001' AND TABLE_NAME = 'CRMA_AGG_DT_CUSTOMER_AI' AND COLUMN_NAME = 'MDM_PROCESSED_DATE'; | true
+POC-2: mdm_processed_date never NULL in golden | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE mdm_processed_date IS NULL; | true
+POC-2: birth_date column exists in golden record | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'MDM_AGG_v001' AND TABLE_NAME = 'CRMA_AGG_DT_CUSTOMER_AI' AND COLUMN_NAME = 'BIRTH_DATE'; | true
+POC-2: citizenship column exists in golden record | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'MDM_AGG_v001' AND TABLE_NAME = 'CRMA_AGG_DT_CUSTOMER_AI' AND COLUMN_NAME = 'CITIZENSHIP'; | true
+POC-2: BANK citizenship is never NICE-only (FREG+BS tied rank-1 survivorship exception) | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE organization = 'BANK' AND citizenship_source = 'NICE' AND EXISTS (SELECT 1 FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI c2 WHERE c2.customer_group_id = CRMA_AGG_DT_CUSTOMER_AI.customer_group_id AND c2.SOURCE_SYSTEM LIKE '%FREG%'); | true
+POC-2: match audit table (before-match snapshot) exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_AGG_v001' AND TABLE_NAME = 'CRMA_AGG_DT_MATCH_AUDIT'; | true
+
+# =============================================================================
+# POC SCENARIO 3: Fuzzy-only load (NICE records with no SSN, matched by name)
+# FAILING (TDD red): CRMI_RAW_TB_NICE doesn't exist; 'ssn' and 'match_method' columns missing
+# =============================================================================
+
+POC-3: RAW NICE table exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_RAW_v001' AND TABLE_NAME = 'CRMI_RAW_TB_NICE'; | true
+POC-3: RAW NICE table has records with NULL SSN (fuzzy-only scenario data present) | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_RAW_v001.CRMI_RAW_TB_NICE WHERE SSN IS NULL; | true
+POC-3: Fuzzy pipeline golden records include SSN-less entries (name-matched) | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_FUZZY WHERE ssn IS NULL; | true
+POC-3: match_method column exists in fuzzy golden record | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'MDM_AGG_v001' AND TABLE_NAME = 'CRMA_AGG_DT_CUSTOMER_FUZZY' AND COLUMN_NAME = 'MATCH_METHOD'; | true
+POC-3: Fuzzy-name-matched records carry MATCH_METHOD=FUZZY_NAME | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_FUZZY WHERE match_method = 'FUZZY_NAME'; | true
+
+# =============================================================================
+# POC SCENARIO 4: Data steward case (no SSN, fuzzy also fails — queued for review)
+# FAILING (TDD red): CRMA_AGG_DT_CUSTOMER_STEWARD_QUEUE_AI table does not exist
+# =============================================================================
+
+POC-4: Data steward queue table exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_AGG_v001' AND TABLE_NAME = 'CRMA_AGG_DT_CUSTOMER_STEWARD_QUEUE_AI'; | true
+POC-4: Steward queue has unmatched records (no-match scenario data present) | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_STEWARD_QUEUE_AI; | true
+POC-4: Steward queue records all have SOURCE_KEY (no null source keys) | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_STEWARD_QUEUE_AI WHERE SOURCE_KEY IS NULL; | true
+POC-4: Every steward queue record has a valid SOURCE_SYSTEM | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_STEWARD_QUEUE_AI WHERE SOURCE_SYSTEM IS NULL; | true
+
+# =============================================================================
+# POC SCENARIO 5: Unmerge (split previously merged golden record, cascade to history)
+# FAILING (TDD red): CRMA_AGG_TB_UNMERGE_OVERRIDES table and MATCH_STATUS column don't exist
+# =============================================================================
+
+POC-5: Unmerge overrides table exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_AGG_v001' AND TABLE_NAME = 'CRMA_AGG_TB_UNMERGE_OVERRIDES'; | true
+POC-5: MATCH_STATUS column exists in customer groups DT | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'MDM_AGG_v001' AND TABLE_NAME = 'CRMA_AGG_DT_CUSTOMER_GROUPS_AI' AND COLUMN_NAME = 'MATCH_STATUS'; | true
+POC-5: History records an UNMERGE event after override is applied | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_GROUPS_AI WHERE MATCH_STATUS = 'UNMERGE'; | true
+POC-5: After unmerge, no SSN+org combination appears in two different active golden groups | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM (SELECT ssn, organization FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE ssn IS NOT NULL GROUP BY ssn, organization HAVING COUNT(*) > 1); | true
+
+# =============================================================================
+# POC SCENARIO 6: Cross-org data exchange (BANK+INS share golden; survivorship updated)
+# FAILING (TDD red): cross-org view and INS-as-source-for-BANK don't exist
+# =============================================================================
+
+POC-6: Cross-org serving view exists | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_SRV_v001' AND TABLE_NAME = 'CRMS_AGG_VW_CUSTOMER_360_CROSS_ORG'; | true
+POC-6: Cross-org view returns records (customers present in both BANK and INS) | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_SRV_v001.CRMS_AGG_VW_CUSTOMER_360_CROSS_ORG; | true
+POC-6: Cross-org view has SSN, BANK_FIRST_NAME and INS_FIRST_NAME (SSN join validates both sides) | SELECT CASE WHEN COUNT(*) = 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_SRV_v001.CRMS_AGG_VW_CUSTOMER_360_CROSS_ORG WHERE SSN IS NULL OR BANK_FIRST_NAME IS NULL OR INS_FIRST_NAME IS NULL; | true
+POC-6: After org-sharing, BANK golden records include INS as contributing source | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE organization = 'BANK' AND SOURCE_SYSTEM LIKE '%INS%'; | true
+POC-6: After org-sharing, INS golden records include BANK as contributing source | SELECT CASE WHEN COUNT(*) > 0 THEN 'true' ELSE 'false' END AS result FROM {{DATABASE}}.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE organization = 'INS' AND SOURCE_SYSTEM LIKE '%BANK%'; | true
+
+# =============================================================================
+# SPB1-SPECIFIC TESTS — Norwegian format validation and org coverage
+# =============================================================================
+
+# Personnummer format
+SSN format valid in FREG | SELECT COUNT(*) FROM MDM_DEV.MDM_RAW_v001.CRMI_RAW_TB_FREG WHERE SSN IS NOT NULL AND NOT REGEXP_LIKE(SSN, '^[0-9]{11}$') | 0
+# Organization split
+BANK golden records exist (AI) | SELECT COUNT(*) FROM MDM_DEV.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE ORGANIZATION = 'BANK' | > 0
+INS golden records exist (AI) | SELECT COUNT(*) FROM MDM_DEV.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_AI WHERE ORGANIZATION = 'INS' | > 0
+BANK golden records exist (FUZZY) | SELECT COUNT(*) FROM MDM_DEV.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_FUZZY WHERE ORGANIZATION = 'BANK' | > 0
+# Data steward queue
+Steward queue not empty | SELECT COUNT(*) FROM MDM_DEV.MDM_AGG_v001.CRMA_AGG_DT_CUSTOMER_STEWARD_QUEUE_AI | > 0
+# Cross-org
+Cross-org customers exist | SELECT COUNT(*) FROM MDM_DEV.MDM_SRV_v001.CRMS_AGG_VW_CUSTOMER_360_CROSS_ORG | > 0
+# Norwegian phone format
+No invalid phone formats in BS | SELECT COUNT(*) FROM MDM_DEV.MDM_RAW_v001.CRMI_RAW_TB_BS WHERE PHONE IS NOT NULL AND NOT REGEXP_LIKE(PHONE, '^\\+47[0-9]{8}$') | 0
+# Norwegian postnummer
+No invalid postnummer in address | SELECT COUNT(*) FROM MDM_DEV.MDM_RAW_v001.CRMI_RAW_TB_ADDRESSES_FREG WHERE POSTNUMMER IS NOT NULL AND NOT REGEXP_LIKE(POSTNUMMER, '^[0-9]{4}$') | 0
+# FREG records appear in both orgs (CROSS JOIN effect)
+FREG feeds BANK pipeline | SELECT COUNT(*) FROM MDM_DEV.MDM_AGG_v001.CRMA_AGG_VW_CUSTOMER_UNION WHERE SOURCE_SYSTEM = 'FREG' AND ORGANIZATION = 'BANK' | > 0
+FREG feeds INS pipeline | SELECT COUNT(*) FROM MDM_DEV.MDM_AGG_v001.CRMA_AGG_VW_CUSTOMER_UNION WHERE SOURCE_SYSTEM = 'FREG' AND ORGANIZATION = 'INS' | > 0
+# Unmerge override table exists
+Unmerge overrides table exists | SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'MDM_AGG_v001' AND TABLE_NAME = 'CRMA_AGG_TB_UNMERGE_OVERRIDES' | 1
