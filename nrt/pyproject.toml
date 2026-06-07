@@ -1,0 +1,32 @@
+[project]
+name = "nrt-mdm"
+version = "0.1.0"
+description = "Near-Real-Time MDM Engine: Kafka consumer, entity resolution, golden record management"
+requires-python = ">=3.11"
+dependencies = [
+    "confluent-kafka>=2.3",
+    "psycopg[binary]>=3.1",
+    "psycopg-pool>=3.1",
+    "jellyfish>=1.0",
+    "faker>=24.0",
+    "pyyaml>=6.0",
+    "streamlit>=1.35",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.3",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+timeout = 30

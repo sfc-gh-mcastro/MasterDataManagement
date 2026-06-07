@@ -1,0 +1,40 @@
+# NRT MDM Configuration
+
+kafka:
+  bootstrap_servers: ${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}
+  group_id: ${KAFKA_GROUP_ID:-nrt-mdm-consumer}
+  topics:
+    inbound:
+      - topic.crm.a
+      - topic.crm.b
+      - topic.crm.c
+    golden: topic.mdm.golden
+    xref: topic.mdm.xref
+    dlq: topic.mdm.dlq
+  producer:
+    acks: all
+    enable_idempotence: true
+    retries: 3
+
+postgres:
+  dsn: ${POSTGRES_DSN:-postgresql://mdm:mdm@localhost:5432/mdm}
+  pool_min: 2
+  pool_max: 10
+
+matching:
+  threshold: 0.70
+  rules:
+    D01_email_exact: 1.00
+    D02_phone_last10: 0.95
+    C01_canonical_name: 0.80
+    P01_name_jw_weight: 0.30
+    P01_name_jw_threshold: 0.85
+    P03_soundex: 0.20
+    P04_email_domain_name: 0.15
+    P04_fn_jw_threshold: 0.90
+
+survivorship:
+  source_priority:
+    CRM_A: 1
+    CRM_B: 2
+    CRM_C: 3

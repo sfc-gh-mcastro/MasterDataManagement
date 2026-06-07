@@ -1,0 +1,12 @@
+.DS_Store
+out/
+output/
+.scannerwork/
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+app/.streamlit/secrets.toml
+bulk/app/.streamlit/secrets.toml
+.streamlit/secrets.toml
+.snowflake/
