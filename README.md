@@ -1,4 +1,5 @@
 # Snowflake-Native Master Data Management
+<!-- test: trigger cortex-code-review action -->
 
 ## Repository Structure
 
