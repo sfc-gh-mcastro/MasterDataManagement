@@ -1,0 +1,33 @@
+name: Cortex Code Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: sfc-gh-mcastro/cortex-code-action@main
+        with:
+          snowflake_account: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          snowflake_user: ${{ secrets.SNOWFLAKE_USER }}
+          snowflake_private_key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+          model: "auto"
+          max_turns: "25"
+          prompt: |
+            Review this PR for code quality, correctness, security vulnerabilities,
+            and adherence to the project's coding conventions. Focus on:
+            - Potential bugs or logic errors
+            - Security issues (injection, auth bypass, data leaks)
+            - Performance concerns
+            - Code clarity and maintainability
+            Post your findings as a comment on the PR tracking comment.
